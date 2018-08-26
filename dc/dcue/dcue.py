@@ -10,13 +10,13 @@ DOI: 10.1145/nnnnnnn.nnnnnnn
 import torch
 import torch.nn as nn
 
-from audiomodel import ConvNetScatter
-from audiomodel import ConvNetMel
+from dc.dcue.audiomodel import ConvNetScatter
+from dc.dcue.audiomodel import ConvNetMel
 
-from userembedding import UserEmbeddings
+from dc.dcue.userembedding import UserEmbeddings
 
 
-class DCUE(nn.Module):
+class DCUENet(nn.Module):
 
     """PyTorch class implementing DCUE Model."""
 
@@ -26,7 +26,7 @@ class DCUE(nn.Module):
 
         Takes a single argument dict_args that is a dictionary containing:
 
-        input_type: 'scatter' or 'mel'
+        data_type: 'scatter' or 'mel'
         feature_dim: The dimension of the embedded feature vectors for both
         users and audio.
         user_embdim: The dimension of the user lookup embedding.
@@ -35,17 +35,19 @@ class DCUE(nn.Module):
         super(DCUE, self).__init__()
 
         # conv net attributes
-        self.input_type = dict_args["input_type"]
+        self.data_type = dict_args["data_type"]
         self.feature_dim = dict_args["feature_dim"]
         self.user_embdim = dict_args["user_embdim"]
         self.user_count = dict_args["user_count"]
+        self.bn_momentum = dict_args["bn_momentum"]
 
         # convnet arguments
-        dict_args = {'output_size': self.feature_dim}
+        dict_args = {'output_size': self.feature_dim,
+                     'bn_momentum': self.bn_momentum}
 
-        if self.input_type == 'scatter':
+        if self.data_type == 'scatter':
             self.conv = ConvNetScatter(dict_args)
-        elif self.input_type == 'mel':
+        elif self.data_type == 'mel':
             self.conv = ConvNetMel(dict_args)
 
         # user embedding arguments
@@ -57,7 +59,7 @@ class DCUE(nn.Module):
 
         self.sim = nn.CosineSimilarity(dim=1)
 
-    def forward(self, u, pos, neg):
+    def forward(self, u, pos, neg=None):
         """
         Forward pass.
 
@@ -71,20 +73,27 @@ class DCUE(nn.Module):
         pos_featvects = self.conv(pos)
         pos_scores = self.sim(u_featvects, pos_featvects)
 
-        # negative scores
-        batch_size, neg_batch_size, channels, seqdim, seqlen = neg.size()
-        neg = neg.view([batch_size * neg_batch_size, channels, seqdim, seqlen])
-        neg_featvects = self.conv(neg)
-        neg_featvects = neg_featvects.view(
-            [batch_size, neg_batch_size, self.feature_dim])
-        neg_scores = self.sim(
-            u_featvects.unsqueeze(2), neg_featvects.permute(0, 2, 1))
-        neg_scores = neg_scores.sum(dim=1)
+        if neg is not None:
+            # negative scores
+            batch_size, neg_batch_size, channels, seqdim, seqlen = neg.size()
+            neg = neg.view(
+                [batch_size * neg_batch_size, channels, seqdim, seqlen])
+            neg_featvects = self.conv(neg)
+            neg_featvects = neg_featvects.view(
+                [batch_size, neg_batch_size, self.feature_dim])
+            neg_scores = self.sim(
+                u_featvects.unsqueeze(2), neg_featvects.permute(0, 2, 1))
+        else:
+            neg_scores = 0
 
-        return pos_scores - neg_scores
+        scores = pos_scores.view(pos_scores.size()[0], 1) - neg_scores
+
+        return scores
 
 
 if __name__ == '__main__':
+
+    truth = torch.ones([2, 1])*-1
 
     dict_argstest = {'output_size': 100}
     conv = ConvNetScatter(dict_argstest)
@@ -109,4 +118,16 @@ if __name__ == '__main__':
     neg_scorestest = sim(
         utest.unsqueeze(2), neg_featvectstest.permute(0, 2, 1))
 
-    neg_scorestest.sum(dim=1)
+    scorestest = pos_scorestest.view(
+        pos_scorestest.size()[0], 1) - neg_scorestest
+
+    scorestest[1,0] = 1
+    scorestest[1,1] = 2
+    scorestest[1,2] = 2
+    scorestest[0,0] = 1
+    scorestest[0,1] = 2
+    scorestest[0,2] = 2
+
+    loss = nn.HingeEmbeddingLoss(0.2)
+
+    loss(scorestest, truth)

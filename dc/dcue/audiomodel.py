@@ -20,46 +20,52 @@ class ConvNetScatter(nn.Module):
         """
         super(ConvNetScatter, self).__init__()
         self.output_size = dict_args["output_size"]
+        self.bn_momentum = dict_args["bn_momentum"]
         # input_size = batch size x 1 x 441 x 17
         self.layer1 = nn.Conv2d(
             in_channels=1, out_channels=128, kernel_size=(1, 11),
-            stride=(1, 1), padding=(0, 5))
+            stride=(1, 1), padding=(0, 5), bias=False)
         self.pool1 = nn.MaxPool2d(kernel_size=(441, 1))
-        self.batchnorm1 = nn.BatchNorm2d(128)
+        self.batchnorm1 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu1 = nn.ReLU()
         # batch size x 128 x 1 x 17
 
         self.layer2 = nn.Conv2d(
             in_channels=128, out_channels=128, kernel_size=(1, 11),
-            stride=(1, 1), padding=(0, 5))
+            stride=(1, 1), padding=(0, 5), bias=False)
         self.pool2 = nn.MaxPool2d(
             kernel_size=(1, 3), stride=(1, 1), padding=(0, 1))
-        self.batchnorm2 = nn.BatchNorm2d(128)
+        self.batchnorm2 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu2 = nn.ReLU()
         # batch size x 128 x 1 x 17
 
         self.layer3 = nn.Conv2d(
             in_channels=128, out_channels=128, kernel_size=(1, 11),
-            stride=(1, 1))
+            stride=(1, 1), bias=False)
         self.pool3 = nn.MaxPool2d(
             kernel_size=(1, 3), stride=(1, 1), padding=(0, 1))
-        self.batchnorm3 = nn.BatchNorm2d(128)
+        self.batchnorm3 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu3 = nn.ReLU()
         # batch size x 128 x 1 x 7
 
         self.layer4 = nn.Conv2d(
             in_channels=128, out_channels=128, kernel_size=(1, 4),
-            stride=(1, 1))
+            stride=(1, 1), bias=False)
         self.pool4 = nn.MaxPool2d(kernel_size=(1, 2))
-        self.batchnorm4 = nn.BatchNorm2d(128)
+        self.batchnorm4 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu4 = nn.ReLU()
         # batch size x 128 x 1 x 2
 
         self.layer5 = nn.Conv2d(
             in_channels=128, out_channels=256, kernel_size=(1, 1),
-            stride=(1, 1))
+            stride=(1, 1), bias=False)
         self.pool5 = nn.MaxPool2d(kernel_size=(1, 2))
-        self.batchnorm5 = nn.BatchNorm2d(256)
+        self.batchnorm5 = nn.BatchNorm2d(
+            256, momentum=self.bn_momentum, track_running_stats=False)
         self.relu5 = nn.ReLU()
         # batch size x 1 x 256 x 1
 
@@ -115,46 +121,52 @@ class ConvNetMel(nn.Module):
         """
         super(ConvNetMel, self).__init__()
         self.output_size = dict_args["output_size"]
-        # input_size = batch size x 1 x 441 x 17
+        self.bn_momentum = dict_args["bn_momentum"]
+        # input_size = batch size x 1 x 128 x 44
         self.layer1 = nn.Conv2d(
-            in_channels=1, out_channels=128, kernel_size=(1, 11),
-            stride=(1, 1), padding=(0, 5))
-        self.pool1 = nn.MaxPool2d(kernel_size=(441, 1))
-        self.batchnorm1 = nn.BatchNorm2d(128)
+            in_channels=1, out_channels=128, kernel_size=(1, 29),
+            stride=(1, 1), padding=(0, 14), bias=False)
+        self.pool1 = nn.MaxPool2d(kernel_size=(128, 1))
+        self.batchnorm1 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu1 = nn.ReLU()
-        # batch size x 128 x 1 x 17
+        # batch size x 128 x 1 x 44
 
         self.layer2 = nn.Conv2d(
-            in_channels=128, out_channels=128, kernel_size=(1, 11),
-            stride=(1, 1), padding=(0, 5))
+            in_channels=128, out_channels=128, kernel_size=(1, 29),
+            stride=(1, 1), padding=(0, 14), bias=False)
         self.pool2 = nn.MaxPool2d(
             kernel_size=(1, 3), stride=(1, 1), padding=(0, 1))
-        self.batchnorm2 = nn.BatchNorm2d(128)
+        self.batchnorm2 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu2 = nn.ReLU()
-        # batch size x 128 x 1 x 17
+        # batch size x 128 x 1 x 44
 
         self.layer3 = nn.Conv2d(
-            in_channels=128, out_channels=128, kernel_size=(1, 11),
-            stride=(1, 1))
+            in_channels=128, out_channels=128, kernel_size=(1, 29),
+            stride=(1, 1), bias=False)
         self.pool3 = nn.MaxPool2d(
             kernel_size=(1, 3), stride=(1, 1), padding=(0, 1))
-        self.batchnorm3 = nn.BatchNorm2d(128)
+        self.batchnorm3 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu3 = nn.ReLU()
-        # batch size x 128 x 1 x 7
+        # batch size x 128 x 1 x 16
 
         self.layer4 = nn.Conv2d(
-            in_channels=128, out_channels=128, kernel_size=(1, 4),
-            stride=(1, 1))
+            in_channels=128, out_channels=128, kernel_size=(1, 10),
+            stride=(1, 1), bias=False)
         self.pool4 = nn.MaxPool2d(kernel_size=(1, 2))
-        self.batchnorm4 = nn.BatchNorm2d(128)
+        self.batchnorm4 = nn.BatchNorm2d(
+            128, momentum=self.bn_momentum, track_running_stats=False)
         self.relu4 = nn.ReLU()
-        # batch size x 128 x 1 x 2
+        # batch size x 128 x 1 x 3
 
         self.layer5 = nn.Conv2d(
             in_channels=128, out_channels=256, kernel_size=(1, 1),
-            stride=(1, 1))
-        self.pool5 = nn.MaxPool2d(kernel_size=(1, 2))
-        self.batchnorm5 = nn.BatchNorm2d(256)
+            stride=(1, 1), bias=False)
+        self.pool5 = nn.MaxPool2d(kernel_size=(1, 3))
+        self.batchnorm5 = nn.BatchNorm2d(
+            256, momentum=self.bn_momentum, track_running_stats=False)
         self.relu5 = nn.ReLU()
         # batch size x 1 x 256 x 1
 
