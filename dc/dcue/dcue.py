@@ -32,7 +32,7 @@ class DCUENet(nn.Module):
         user_embdim: The dimension of the user lookup embedding.
         user_count: The count of users that will be embedded.
         """
-        super(DCUE, self).__init__()
+        super(DCUENet, self).__init__()
 
         # conv net attributes
         self.data_type = dict_args["data_type"]

@@ -3,11 +3,13 @@
 from abc import ABC, abstractmethod
 
 import os
+import datetime
 
 import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
@@ -23,13 +25,11 @@ from dc.pytorchdatasets import DCBRDataset
 from dc.pytorchdatasets import DCBRPredset
 from dc.pytorchdatasets import DCUEDataset
 from dc.pytorchdatasets import DCUEPredset
+from dc.pytorchdatasets import DCUEItemset
 
 from dc.pytorchdatasets import ToTensor
-from dc.pytorchdatasets import RandomSample
 
-from dc.dcbr.nn.audiomodel import ConvNetMel
-from dc.dcbr.nn.audiomodel import ConvNetScatter
-
+from dc.dcbr.dcbr import DCBRNet
 from dc.dcue.dcue import DCUENet
 
 
@@ -128,14 +128,13 @@ class DCBR(Trainer):
 
         # additional cf attributes
         self.triplets_txt = None
-        self.cf_model_dir = None
         self.dh = None
         self.wrmf = None
 
         # additional nn attributes
         self.metadata_csv = None
-        self.nn_model_dir = None
-        self.factors_csv = None
+        self.models_dir = None
+        self.wrmf_name = None
         self.u_factors_csv = None
         self.nn_train_data = None
         self.nn_val_data = None
@@ -148,10 +147,6 @@ class DCBR(Trainer):
         self.nn_epoch = None
         self.nn_dict_args = None
 
-        # combined model attributes
-        self.user_factors = None
-        self.item_factors = None
-
         if torch.cuda.is_available():
             self.USE_CUDA = True
 
@@ -160,6 +155,7 @@ class DCBR(Trainer):
         # cf data
         if self.dh is None:
             self.dh = CFDataHandler(self.triplets_txt)
+            self.dh.item_user_matrix()
             self.dh.train_test_split(0.9)
 
     def load_nn_dataset(self, split, transform=None, excluded_ids=None):
@@ -175,43 +171,42 @@ class DCBR(Trainer):
             if self.wrmf is not None:
                 # nn data
                 self.nn_train_data = DCBRDataset(
-                    self.metadata_csv, self.factors_csv, split,
-                    mode='dev', return_id=False, transform=transform,
-                    excluded_ids=excluded_ids, data_type=self.data_type)
+                    self.metadata_csv, self.dh.item_index, split,
+                    transform=transform, excluded_ids=excluded_ids,
+                    data_type=self.data_type)
 
         elif split == 'val':
             if self.wrmf is not None:
                 # nn data
                 self.nn_val_data = DCBRDataset(
-                    self.metadata_csv, self.factors_csv, split,
-                    mode='dev', return_id=False, transform=transform,
-                    excluded_ids=excluded_ids, data_type=self.data_type)
+                    self.metadata_csv, self.dh.item_index, split,
+                    transform=transform, excluded_ids=excluded_ids,
+                    data_type=self.data_type)
 
         elif split == 'test':
             if self.wrmf is not None:
                 # nn data
                 self.nn_test_data = DCBRDataset(
-                    self.metadata_csv, self.factors_csv, split,
-                    mode='dev', return_id=False, transform=transform,
-                    excluded_ids=excluded_ids, data_type=self.data_type)
+                    self.metadata_csv, self.dh.item_index, split,
+                    transform=transform, excluded_ids=excluded_ids,
+                    data_type=self.data_type)
 
         elif split == 'all':
             if self.wrmf is not None:
                 # nn data
                 self.nn_all_data = DCBRDataset(
-                    self.metadata_csv, self.factors_csv, split,
-                    mode='inference', return_id=False, transform=transform,
-                    excluded_ids=excluded_ids, data_type=self.data_type)
+                    self.metadata_csv, self.dh.item_index, split,
+                    transform=transform, excluded_ids=excluded_ids,
+                    data_type=self.data_type)
 
     def load_pred_dataset(self, split, transform=None, excluded_ids=None):
         """Load data for predicting."""
         if self.wrmf is not None:
             self.nn_pred_data = DCBRPredset(
-                self.metadata_csv, self.u_factors_csv, self.dh,
-                split=split, transform=transform,
-                excluded_ids=excluded_ids, data_type=self.data_type)
+                self.metadata_csv, self.dh, split=split, transform=transform,
+                excluded_ids=excluded_ids)
 
-    def fit_cf(self, triplets_txt, save_dir):
+    def fit_cf(self, triplets_txt):
         """
         Train CF model.
 
@@ -220,7 +215,6 @@ class DCBR(Trainer):
             save_dir: directory to save model.
         """
         self.triplets_txt = triplets_txt
-        self.cf_model_dir = save_dir
 
         self.load_cf_dataset()
 
@@ -237,22 +231,16 @@ class DCBR(Trainer):
 
         self.wrmf.fit(self.dh.item_user_train)
 
-        self.save(cf_model_dir=self.cf_model_dir)
-        self.user_factors = torch.from_numpy(self.wrmf.wrmf.user_factors)
-
     def _init_nn(self):
         """Initialize the nn model for training."""
-        # Initialize model and optimizer
         self.nn_dict_args = {
             'output_size': self.output_size,
             'dropout': self.dropout,
-            'init_fc_bias': self.nn_train_data.target_data.mean(0),
-            'bn_momentum': self.bn_momentum}
+            'init_fc_bias': self.wrmf.wrmf.item_factors.mean(0),
+            'bn_momentum': self.bn_momentum,
+            'data_type': self.data_type}
 
-        if self.data_type == 'mel':
-            self.nn_model = ConvNetMel(self.nn_dict_args)
-        elif self.data_type == 'scatter':
-            self.nn_model = ConvNetScatter(self.nn_dict_args)
+        self.nn_model = DCBRNet(self.nn_dict_args)
 
         self.nn_loss_func = nn.MSELoss()
         self.nn_optimizer = optim.Adam(
@@ -273,17 +261,21 @@ class DCBR(Trainer):
 
             # batch size x 1 x scatter dim x seqlen
             inputs = batch_samples['data'].permute(0, 2, 1).unsqueeze(1)
-            # batch size x factors dim
-            target = batch_samples['target']
+            # batch size x 1
+            target_index = batch_samples['target_index']
+            # batch size x feature_dim
+            target = []
+            for idx in target_index:
+                target += [torch.from_numpy(
+                    self.wrmf.wrmf.item_factors[idx])]
+            target = torch.stack(target)
 
             if self.USE_CUDA:
                 inputs = inputs.cuda()
                 target = target.cuda()
 
-            # clear gradients
-            self.nn_model.zero_grad()
-
             # forward pass
+            self.nn_model.zero_grad()
             pred = self.nn_model(inputs)
 
             # backward pass
@@ -311,8 +303,14 @@ class DCBR(Trainer):
 
                 # batch size x 1 x scatter dim x seqlen
                 inputs = batch_samples['data'].permute(0, 2, 1).unsqueeze(1)
-                # batch size x factors dim
-                target = batch_samples['target']
+                # batch size x 1
+                target_index = batch_samples['target_index']
+                # batch size x feature_dim
+                target = []
+                for idx in target_index:
+                    target += [torch.from_numpy(
+                        self.wrmf.wrmf.item_factors[idx])]
+                target = torch.stack(target)
 
                 if self.USE_CUDA:
                     inputs = inputs.cuda()
@@ -343,7 +341,7 @@ class DCBR(Trainer):
 
         """
         # Print settings to output file
-        print("Factors File:{}\n\
+        print("WRMF Name:{}\n\
                Output Size: {}\n\
                Dropout Rate: {}\n\
                Batch Size: {}\n\
@@ -354,22 +352,17 @@ class DCBR(Trainer):
                Weight Decay: {}\n\
                Num Epochs: {}\n\
                Save Dir: {}".format(
-                   self.factors_csv, self.output_size, self.dropout,
+                   self.wrmf_name, self.output_size, self.dropout,
                    self.batch_size, self.lr, self.beta_one, self.beta_two,
                    self.nn_eps, self.weight_decay, self.num_epochs,
                    save_dir))
 
-        self.nn_model_dir = save_dir
+        self.models_dir = save_dir
         self.metadata_csv = metadata_csv
 
         # load data sets, create data loaders and initializer model
-        if self.data_type == 'mel':
-            composed = Compose([ToTensor(), RandomSample(44, 0)])
-        elif self.data_type == 'scatter':
-            composed = Compose([ToTensor(), RandomSample(17, 0)])
-
-        self.load_nn_dataset(split='train', transform=composed)
-        self.load_nn_dataset(split='val', transform=composed)
+        self.load_nn_dataset(split='train')
+        self.load_nn_dataset(split='val')
 
         train_loader = DataLoader(
             self.nn_train_data, batch_size=self.batch_size, shuffle=True,
@@ -404,9 +397,9 @@ class DCBR(Trainer):
             # Save model
             if val_loss < best_loss:
                 best_loss = val_loss
-                self.save(nn_model_dir=self.nn_model_dir)
+                self.save(models_dir=self.models_dir)
 
-    def fit(self, triplets_txt, metadata_csv, cf_save_dir, nn_save_dir):
+    def fit(self, triplets_txt, metadata_csv, save_dir):
         """
         Fit DCBR model.
 
@@ -416,17 +409,12 @@ class DCBR(Trainer):
             cf_save_dir: directory to save cf_model.
             nn_save_dir: directory to save nn_model.
         """
-        self.fit_cf(triplets_txt, cf_save_dir)
-        self.fit_nn(metadata_csv, nn_save_dir)
+        self.fit_cf(triplets_txt)
+        self.fit_nn(metadata_csv, save_dir)
 
-    def _make_item_factors_nn(self):
+    def insert_nn_factors(self):
         """Build learned item factor matrix."""
-        if self.data_type == 'mel':
-            composed = Compose([ToTensor(), RandomSample(44, 0)])
-        elif self.data_type == 'scatter':
-            composed = Compose([ToTensor(), RandomSample(17, 0)])
-
-        self.load_nn_dataset(split='all', transform=composed)
+        self.load_nn_dataset(split='all')
 
         all_loader = DataLoader(
             self.nn_all_data, batch_size=self.batch_size, shuffle=False,
@@ -434,26 +422,22 @@ class DCBR(Trainer):
 
         self.nn_model.eval()
 
-        self.item_factors = torch.zeros(
-            [len(self.nn_all_data), self.factors])
+        with torch.no_grad():
+            for batch_samples in all_loader:
+                # batch size x 1 x frequency dim x seqlen
+                inputs = batch_samples['data'].permute(0, 2, 1).unsqueeze(1)
+                # batch size x 1
+                target_index = batch_samples['target_index']
 
-        samples_processed = 0
-        for batch_samples in all_loader:
-            # batch size x 1 x frequency dim x seqlen
-            inputs = batch_samples['data'].permute(0, 2, 1).unsqueeze(1)
+                if self.USE_CUDA:
+                    inputs = inputs.cuda()
 
-            if self.USE_CUDA:
-                inputs = inputs.cuda()
+                # forward pass
+                pred = self.nn_model(inputs)
 
-            # forward pass
-            pred = self.nn_model(inputs)
-
-            # Insert item factors
-            for i in range(pred.size()[0]):
-                self.item_factors[i + samples_processed] = pred[i]
-
-            batch_size = inputs.size()[0]
-            samples_processed += batch_size
+                # insert item_factors
+                for i, idx in enumerate(target_index):
+                    self.wrmf.wrmf.item_factors[idx] = pred[i]
 
     def score(self, users, split):
         """
@@ -465,25 +449,16 @@ class DCBR(Trainer):
         """
         self.nn_model.eval()
 
-        if self.data_type == 'mel':
-            transformer = RandomSample(44, 0)
-        elif self.data_type == 'scatter':
-            transformer = RandomSample(17, 0)
-
-        self.load_pred_dataset(split, transform=transformer)
-        self._make_item_factors_nn()
+        self.load_pred_dataset(split)
 
         auc = []
         for user_id in users:
             scores, targets = self.predict(user_id, split)
 
             if (scores is not None) and (targets is not None):
-                user_auc = roc_auc_score(targets, scores)
                 auc += [roc_auc_score(targets, scores)]
-                print("User AUC: {}".format(user_auc))
 
-        final_auc = np.mean(auc)
-        print("Overall AUC {}".format(final_auc))
+        return np.mean(auc)
 
     def predict(self, user, split):
         """
@@ -493,8 +468,7 @@ class DCBR(Trainer):
             user: a user id
             split: 'train' or 'test'
         """
-        i = self.dh.user_index[user]
-        self.nn_pred_data.create_user_data(i)
+        self.nn_pred_data.create_user_data(user)
 
         if self.nn_pred_data.user_has_songs:
 
@@ -507,17 +481,26 @@ class DCBR(Trainer):
                 targets = []
                 for batch_samples in pred_loader:
 
-                    u = batch_samples['u']
-                    indexes = batch_samples['i']
-                    items = self.item_factors[indexes]
+                    u = []
+                    for idx in batch_samples['user_index']:
+                        u += [torch.from_numpy(
+                            self.wrmf.wrmf.user_factors[idx])]
+                    u = torch.stack(u)
+
+                    i = []
+                    for idx in batch_samples['item_index']:
+                        i += [torch.from_numpy(
+                            self.wrmf.wrmf.item_factors[idx])]
+                    i = torch.stack(i)
+
                     target = batch_samples['target']
 
                     if self.USE_CUDA:
                         u = u.cuda()
-                        items = items.cuda()
+                        i = i.cuda()
                         target = target.cuda()
 
-                    score = torch.mm(u.t().float(), items.float())
+                    score = F.cosine_similarity(u.float(), i.float())
                     scores += score.cpu().numpy().tolist()
                     targets += target.cpu().numpy().tolist()
 
@@ -525,98 +508,30 @@ class DCBR(Trainer):
 
         return None, None
 
-    # def predict(self, user, split):
-    #     """
-    #     Predict for a user.
-    #
-    #     Args
-    #         user: a user id
-    #         split: 'train' or 'test'
-    #     """
-    #     i = self.dh.user_index[user]
-    #     self.nn_pred_data.create_user_data(i)
-    #
-    #     if self.nn_pred_data.user_has_songs:
-    #
-    #         pred_loader = DataLoader(
-    #             self.nn_pred_data, batch_size=self.batch_size, shuffle=False,
-    #             num_workers=4)
-    #
-    #         # self.nn_model.eval()
-    #
-    #         with torch.no_grad():
-    #             scores = []
-    #             targets = []
-    #             for i, batch_samples in enumerate(pred_loader):
-    #                 if i == np.ceil(len(self.nn_pred_data) * 0.10):
-    #                     self.nn_model.eval()
-    #
-    #                 u = batch_samples['u']
-    #                 inputs = batch_samples[
-    #                     'data'].permute(0, 2, 1).unsqueeze(1)
-    #                 target = batch_samples['target']
-    #
-    #                 if self.USE_CUDA:
-    #                     u = u.cuda()
-    #                     inputs = inputs.cuda()
-    #                     target = target.cuda()
-    #
-    #                 preds = self.nn_model(inputs)
-    #                 score = torch.mm(u.t().float(), preds.float())
-    #
-    #                 scores += score.cpu().numpy().tolist()
-    #                 targets += target.cpu().numpy().tolist()
-    #
-    #             # print("Scores: {}\n\
-    #             #        Targets: {}".format(scores, targets))
-    #             # scores = torch.stack(scores)
-    #             # targets = torch.stack(targets)
-    #
-    #         return scores, targets
-    #
-    #     return None, None
-
-    def save(self, cf_model_dir=None, nn_model_dir=None):
+    def save(self, models_dir):
         """
         Save models.
 
         Args
-            cf_model_dir: path to directory for saving CF model factors.
-            nn_model_dir: path to directory for saving NN models.
+            models_dir: path to directory for saving model.
         """
-        if (self.wrmf is not None) and (cf_model_dir is not None):
-            # save learned item factors and summary
-            fname = "item_"+str(self.wrmf.factors) + \
-                    "_reg_"+str(self.wrmf.l2) + \
-                    "_iter_"+str(self.wrmf.n_iter) + \
-                    "_alpha_" + str(self.wrmf.alpha) + \
-                    "_eps_" + str(self.wrmf.eps) + ".csv"
+        self.wrmf_name = "fact_"+str(self.wrmf.factors) + \
+                         "_reg_"+str(self.wrmf.l2) + \
+                         "_iter_"+str(self.wrmf.n_iter) + \
+                         "_alpha_" + str(self.wrmf.alpha) + \
+                         "_eps_" + str(self.wrmf.eps)
 
-            f = os.path.join(cf_model_dir, fname)
-            np.savetxt(f, self.wrmf.wrmf.item_factors)
-            self.factors_csv = f
-
-            fname = "user_"+str(self.wrmf.factors) + \
-                    "_reg_"+str(self.wrmf.l2) + \
-                    "_iter_"+str(self.wrmf.n_iter) + \
-                    "_alpha_" + str(self.wrmf.alpha) + \
-                    "_eps_" + str(self.wrmf.eps) + ".csv"
-
-            f = os.path.join(cf_model_dir, fname)
-            np.savetxt(f, self.wrmf.wrmf.user_factors)
-            self.u_factors_csv = f
-
-        if (self.nn_model is not None) and (nn_model_dir is not None):
+        if self.nn_model is not None:
 
             model_dir = "{}_CONV_drop_{}_lr_{}_b1_{}_b2_{}_wd_{}".format(
-                self.factors_csv.rsplit(".", 1)[0], self.dropout,
-                self.lr, self.beta_one, self.beta_two, self.weight_decay)
+                self.wrmf_name, self.dropout, self.lr, self.beta_one,
+                self.beta_two, self.weight_decay)
 
-            if not os.path.isdir(os.path.join(nn_model_dir, model_dir)):
-                os.makedirs(os.path.join(nn_model_dir, model_dir))
+            if not os.path.isdir(os.path.join(models_dir, model_dir)):
+                os.makedirs(os.path.join(models_dir, model_dir))
 
             filename = "epoch_{}".format(self.nn_epoch) + '.pth'
-            fileloc = os.path.join(nn_model_dir, model_dir, filename)
+            fileloc = os.path.join(models_dir, model_dir, filename)
             with open(fileloc, 'wb') as file:
                 torch.save({'state_dict': self.nn_model.state_dict(),
                             'dcbr_dict': self.__dict__}, file)
@@ -699,6 +614,7 @@ class DCUE(Trainer):
         self.val_data = None
         self.test_data = None
         self.pred_data = None
+        self.item_data = None
 
         # Model attributes
         self.model = None
@@ -706,6 +622,13 @@ class DCUE(Trainer):
         self.loss_func = None
         self.dict_args = None
         self.nn_epoch = None
+
+        self.item_factors = None
+        self.user_factors = None
+
+        self.best_item_factors = None
+        self.best_user_factors = None
+        self.best_auc = None
 
         if torch.cuda.is_available():
             self.USE_CUDA = True
@@ -751,7 +674,21 @@ class DCUE(Trainer):
         """
         self.pred_data = DCUEPredset(
             self.triplets_txt, self.metadata_csv, split,
-            data_type=self.data_type, transform=transform,
+            data_type=self.data_type, n_users=self.n_users,
+            n_items=self.n_items, transform=transform,
+            excluded_ids=excluded_ids)
+
+    def load_item_dataset(self, transform=None, excluded_ids=None):
+        """
+        Load data for generating item_factors.
+
+        Args:
+            transform: transformation to use for NN dataset
+            excluded_ids: ids to exclude from the metadata_csv for NN model.
+        """
+        self.item_data = DCUEItemset(
+            self.triplets_txt, self.metadata_csv, data_type=self.data_type,
+            n_users=self.n_users, n_items=self.n_items, transform=transform,
             excluded_ids=excluded_ids)
 
     def _init_nn(self):
@@ -780,6 +717,8 @@ class DCUE(Trainer):
         train_loss = 0
         samples_processed = 0
         losses_processed = 0
+        k = 1
+
         for batch_samples in loader:
 
             # prepare training sample
@@ -796,14 +735,12 @@ class DCUE(Trainer):
                 pos = pos.cuda()
                 neg = neg.cuda()
 
-            # clear gradients
-            self.model.zero_grad()
-
             # forward pass
+            self.model.zero_grad()
             preds = self.model(u, pos, neg)
 
             # backward pass
-            loss = self.loss_func(preds, y)
+            loss = self.loss_func(preds, y.expand(-1, self.neg_batch_size))
             loss.backward()
             self.optimizer.step()
 
@@ -816,17 +753,51 @@ class DCUE(Trainer):
 
             train_loss += loss.item() * preds_size
 
+            # report AUC mid epoch
+            if samples_processed / (len(self.train_data) * 0.34) > k:
+                # compute auc estimate.  Gives +/- approx 0.017 @ 95%
+                # confidence w/ 20K users.
+                print("Initializing AUC computation...")
+                self._user_factors()
+                self._item_factors()
+                users = list(self.val_data.dh.user_index.keys())
+                n_users = len(users)
+                users_sample = np.random.choice(users, int(n_users * 0.025))
+                val_auc = self.score(users_sample, 'val')
+
+                # report
+                print("Epoch: [{}/{}]\tSamples: [{}/{}]\t\
+                       Validation AUC: {}".format(
+                           self.nn_epoch, self.num_epochs, samples_processed,
+                           len(self.train_data), val_auc))
+                k += 1
+
+                if val_auc > self.best_auc:
+                    self.best_auc = val_auc
+
+                    if self.best_item_factors is None or \
+                       self.best_user_factors is None:
+                        self.best_item_factors = torch.zeros_like(
+                            self.item_factors)
+                        self.best_user_factors = torch.zeros_like(
+                            self.user_factors)
+
+                    self.best_item_factors.copy_(self.item_factors)
+                    self.best_user_factors.copy_(self.user_factors)
+                    
+                    self.save(models_dir=self.model_dir)
+
         train_loss /= losses_processed
 
         return samples_processed, train_loss
 
     def _eval_epoch(self, loader):
         """Eval epoch."""
-        # self.model.eval()
+        self.model.eval()
         val_loss = 0
         samples_processed = 0
         losses_processed = 0
-        self.model.eval()
+
         with torch.no_grad():
             for batch_samples in loader:
 
@@ -850,7 +821,7 @@ class DCUE(Trainer):
                 # forward pass
                 preds = self.model(u, pos, neg)
 
-                loss = self.loss_func(preds, y)
+                loss = self.loss_func(preds, y.expand(-1, self.neg_batch_size))
 
                 # compute loss
                 batch_size = pos.size()[0]
@@ -886,26 +857,23 @@ class DCUE(Trainer):
                EPS: {}\n\
                Weight Decay: {}\n\
                Num Epochs: {}\n\
-               Input Type: {}\n\
+               Data Type: {}\n\
+               Num Users: {}\n\
+               Num Items: {}\n\
                Save Dir: {}".format(
                    self.feature_dim, self.batch_size, self.neg_batch_size,
                    self.u_embdim, self.margin, self.lr, self.beta_one,
                    self.beta_two, self.eps, self.weight_decay, self.num_epochs,
-                   self.input_type, save_dir))
+                   self.data_type, self.n_users, self.n_items, save_dir))
 
         self.model_dir = save_dir
         self.metadata_csv = metadata_csv
         self.triplets_txt = triplets_txt
 
-        if self.data_type == 'mel':
-            composed = Compose(
-                [ToTensor(), RandomSample(44, 0), RandomSample(44, 1)])
-        elif self.data_type == 'scatter':
-            composed = Compose(
-                [ToTensor(), RandomSample(17, 0), RandomSample(17, 1)])
-
-        self.load_nn_dataset(split='train', transform=composed)
-        self.load_nn_dataset(split='val', transform=composed)
+        print("Loading datasets...")
+        self.load_dataset(split='train')
+        self.load_dataset(split='val')
+        self.load_item_dataset()
 
         train_loader = DataLoader(
             self.train_data, batch_size=self.batch_size, shuffle=True,
@@ -915,26 +883,54 @@ class DCUE(Trainer):
 
         self._init_nn()
 
+        # init training variables
         train_loss = 0
         best_loss = float('inf')
         samples_processed = 0
+        self.best_auc = 0
+
+        # train loop
         for epoch in range(self.num_epochs + 1):
             self.nn_epoch = epoch
             if epoch > 0:
-                sp, train_loss = self._nn_train_epoch(train_loader)
+                print("Initializing train epoch...")
+                sp, train_loss = self._train_epoch(train_loader)
                 samples_processed += sp
 
             if epoch % 1 == 0:
-                _, val_loss = self._nn_eval_epoch(val_loader)
-                # report loss
+                # compute loss
+                print("Initializing val epoch...")
+                _, val_loss = self._eval_epoch(val_loader)
+
+                # compute auc estimate.  Gives +/- approx 0.017 @ 95%
+                # confidence w/ 20K users.
+                print("Initializing AUC computation...")
+                self._user_factors()
+                self._item_factors()
+                users = list(self.val_data.dh.user_index.keys())
+                n_users = len(users)
+                users_sample = np.random.choice(users, int(n_users * 0.025))
+                val_auc = self.score(users_sample, 'val')
+
+                # report
                 print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss: \
-                {}\tValidation Loss: {}".format(
+                {}\tValidation Loss: {}\tValidation AUC: {}".format(
                     epoch, self.num_epochs, samples_processed,
                     len(self.train_data)*self.num_epochs, train_loss,
-                    val_loss))
+                    val_loss, val_auc))
 
-            if val_loss < best_loss:
-                best_loss = val_loss
+            if val_auc > self.best_auc:
+                self.best_auc = val_auc
+
+                if self.best_item_factors is None or \
+                   self.best_user_factors is None:
+                    self.best_item_factors = torch.zeros_like(
+                        self.item_factors)
+                    self.best_user_factors = torch.zeros_like(
+                        self.user_factors)
+
+                self.best_item_factors.copy_(self.item_factors)
+                self.best_user_factors.copy_(self.user_factors)
                 self.save(models_dir=self.model_dir)
 
     def score(self, users, split):
@@ -947,24 +943,17 @@ class DCUE(Trainer):
         """
         self.model.eval()
 
-        if self.data_type == 'mel':
-            composed = Compose([RandomSample(44, 0), RandomSample(44, 1)])
-        elif self.data_type == 'scatter':
-            composed = Compose([RandomSample(17, 0), RandomSample(17, 1)])
-
-        self.load_pred_dataset(split, transform=composed)
+        self.load_pred_dataset(split)
 
         auc = []
         for user_id in users:
             scores, targets = self.predict(user_id, split)
 
             if (scores is not None) and (targets is not None):
-                user_auc = roc_auc_score(targets, scores)
                 auc += [roc_auc_score(targets, scores)]
-                print("User AUC: {}".format(user_auc))
 
         final_auc = np.mean(auc)
-        print("Overall AUC {}".format(final_auc))
+        return final_auc
 
     def predict(self, user, split):
         """
@@ -989,25 +978,64 @@ class DCUE(Trainer):
                 targets = []
                 for batch_samples in pred_loader:
 
-                    u = batch_samples['u']
+                    u = []
+                    for idx in batch_samples['u']:
+                        u += [self.user_factors[idx]]
+                    u = torch.stack(u)
+
+                    i = []
+                    for idx in batch_samples['pos_song_idx']:
+                        i += [self.item_factors[idx]]
+                    i = torch.stack(i)
+
                     y = batch_samples['y']
-                    # batch size x 1 x seqdim x seqlen
-                    pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
 
-                    if self.USE_CUDA:
-                        u = u.cuda()
-                        y = y.cuda()
-                        pos = pos.cuda()
+                    if i.size()[0] > 1:
+                        if self.USE_CUDA:
+                            u = u.cuda()
+                            i = i.cuda()
 
-                    # forward pass
-                    preds = self.model(u, pos)
+                        # forward pass
+                        score = F.cosine_similarity(u, i)
 
-                    scores += preds.cpu().numpy().tolist()
-                    targets += y.cpu().numpy().tolist()
+                        scores += score.cpu().numpy().tolist()
+                        targets += y.numpy().tolist()
 
             return scores, targets
 
         return None, None
+
+    def _user_factors(self):
+        """Create user factors matrix."""
+        self.user_factors = torch.zeros([self.n_users, self.feature_dim])
+        with torch.no_grad():
+            for i in list(self.item_data.dh.user_index.values()):
+                emb_idx = torch.LongTensor([i])
+                if self.USE_CUDA:
+                    emb_idx = emb_idx.cuda()
+                self.user_factors[i] = self.model.user_embd(emb_idx)
+
+    def _item_factors(self):
+        """Create item factors matrix."""
+        item_loader = DataLoader(
+            self.item_data, batch_size=self.batch_size, shuffle=False,
+            num_workers=4)
+
+        self.item_factors = torch.zeros(
+            [len(self.item_data.songid2metaindex), self.feature_dim])
+
+        with torch.no_grad():
+            for batch_samples in item_loader:
+                pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
+                metadata_indexes = batch_samples['metadata_index']
+
+                if self.USE_CUDA:
+                    pos = pos.cuda()
+
+                item_factor = self.model.conv(pos)
+
+                for i, idx in enumerate(metadata_indexes):
+                    self.item_factors[idx] = item_factor[i]
 
     def save(self, models_dir=None):
         """
@@ -1016,11 +1044,11 @@ class DCUE(Trainer):
         Args
             models_dir: path to directory for saving NN models.
         """
-        if (self.nn_model is not None) and (models_dir is not None):
+        if (self.model is not None) and (models_dir is not None):
 
-            model_dir = "{}_CONV_drop_{}_lr_{}_b1_{}_b2_{}_wd_{}".format(
-                self.factors_csv.rsplit(".", 1)[0], self.dropout,
-                self.lr, self.beta_one, self.beta_two, self.weight_decay)
+            model_dir = "DCUE_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}".\
+                format(self.lr, self.beta_one, self.beta_two,
+                       self.weight_decay, self.n_users, self.n_items)
 
             if not os.path.isdir(os.path.join(models_dir, model_dir)):
                 os.makedirs(os.path.join(models_dir, model_dir))

@@ -7,8 +7,8 @@ from dc.deep_content import DCBR
 
 def main(factors, l2, alpha, cf_eps, n_iter, n_splits, train_pct, n_recs,
          eval_pct, output_size, dropout, batch_size, lr, beta_one, beta_two,
-         nn_eps, weight_decay, num_epochs, data_type, triplets_txt,
-         metadata_csv, cf_save_dir, nn_save_dir, cf_only):
+         nn_eps, weight_decay, num_epochs, bn_momentum, data_type,
+         triplets_txt, metadata_csv, save_dir, cf_only):
     """Train DCBR model."""
     dcbr = DCBR(factors, l2, alpha, cf_eps, n_iter, n_splits, train_pct,
                 n_recs, eval_pct, output_size, dropout,
@@ -16,9 +16,9 @@ def main(factors, l2, alpha, cf_eps, n_iter, n_splits, train_pct, n_recs,
                 num_epochs, bn_momentum, data_type)
 
     if cf_only:
-        dcbr.fit_cf(triplets_txt, cf_save_dir)
+        dcbr.fit_cf(triplets_txt)
     else:
-        dcbr.fit(triplets_txt, metadata_csv, cf_save_dir, nn_save_dir)
+        dcbr.fit(triplets_txt, metadata_csv, save_dir)
 
 
 if __name__ == '__main__':
@@ -44,8 +44,7 @@ if __name__ == '__main__':
     --data_type scatter \
     --triplets_txt /scratch/swc419/DeepSong/data/MSD/train_triplets.txt \
     --metadata_csv /scratch/swc419/DeepSong/input/MSD/tracks.csv \
-    --cf_save_dir /scratch/swc419/DeepContentRecommenders/cf_models \
-    --nn_save_dir /scratch/swc419/DeepContentRecommenders/nn_models \
+    --save_dir /scratch/swc419/DeepContentRecommenders/dcbr_models \
     --cf_only
     """
     ap = ArgumentParser()
@@ -94,10 +93,8 @@ if __name__ == '__main__':
                     help="Path to triplets.txt file for training.")
     ap.add_argument("-mc", "--metadata_csv",
                     help="Path to metadata.csv file for training")
-    ap.add_argument("-cd", "--cf_save_dir",
-                    help="Path to directory to save CF model.")
-    ap.add_argument("-nd", "--nn_save_dir",
-                    help="Path to directory to save NN model.")
+    ap.add_argument("-sd", "--save_dir",
+                    help="Path to directory to save model.")
     ap.add_argument("-co", "--cf_only", action='store_true',
                     help="Only train CF model.")
 
@@ -125,6 +122,5 @@ if __name__ == '__main__':
          args['data_type'],
          args['triplets_txt'],
          args['metadata_csv'],
-         args['cf_save_dir'],
-         args['nn_save_dir'],
+         args['save_dir'],
          args['cf_only'])

@@ -59,21 +59,6 @@ class WRMF():
 
         return item_user.tocsr()
 
-    def insert_nn_factors(self, item_index, nn_factors_dir):
-        """
-        Insert the predicted item feature vectors into the CF model.
-
-        Args
-            item_index: the item_index from CFDataHandler.
-            nn_factors_dir: Path to the directory containing factors predicted
-                by the neural network.
-        """
-        for song_id, item_idx in item_index.items():
-            f = os.path.join(nn_factors_dir, song_id+".txt")
-            if os.path.isfile(f):
-                pred_factor = np.loadtxt(f)
-                self.wrmf.item_factors[item_idx] = pred_factor
-
     def fit(self, item_user):
         """
         Train the WRMF model.

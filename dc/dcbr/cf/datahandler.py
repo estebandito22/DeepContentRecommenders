@@ -26,7 +26,7 @@ class CFDataHandler():
         self.item_user = None
         self.user_index = None
         self.item_index = None
-        self.item_user_matrix()
+        # self.item_user_matrix()
 
         self.item_user_train = None
         self.item_user_test = None

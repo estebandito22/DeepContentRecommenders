@@ -9,13 +9,16 @@ from dc.deep_content import DCUE
 
 def main(model_dir, epoch, eval_pct):
     """Eval DCBR model."""
+    # load model
     dcue = DCUE()
     dcue.load(model_dir, epoch)
 
+    # generate random user list for evaluation
     users = list(dcue.dh.user_index.keys())
     n_users = len(users)
     users_sample = np.random.choice(users, int(n_users * eval_pct))
 
+    # Compute AUC
     dcue.score(users_sample, 'test')
 
 
