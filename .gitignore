@@ -46,7 +46,7 @@ __init__.py
 ###########
 build
 dist
-UNKNOWN.egg-info
+DeepContentRecommenders.egg-info
 
 # Data Files #
 ##############

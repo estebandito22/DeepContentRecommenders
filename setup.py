@@ -95,4 +95,6 @@ def set_gcc():
 
 
 set_gcc()
-setup(name='CFEvaluators', ext_modules=define_extensions(use_cython))
+packages = ['data', 'dc', 'dc.dcbr', 'dc.dcbr.cf', 'dc.dcbr.nn', 'dc.dcue']
+setup(name='DeepContentRecommenders', packages=packages,
+      ext_modules=define_extensions(use_cython))
