@@ -147,6 +147,8 @@ class DCBR(Trainer):
         self.nn_epoch = None
         self.nn_dict_args = None
 
+        self.best_item_factors = None
+
         if torch.cuda.is_available():
             self.USE_CUDA = True
 
@@ -230,6 +232,7 @@ class DCBR(Trainer):
             raise Exception("n_splits must be > 0!")
 
         self.wrmf.fit(self.dh.item_user_train)
+        self.best_item_factors = self.wrmf.wrmf.item_factors.copy()
 
     def _init_nn(self):
         """Initialize the nn model for training."""
@@ -397,6 +400,7 @@ class DCBR(Trainer):
             # Save model
             if val_loss < best_loss:
                 best_loss = val_loss
+                self.insert_nn_factors()
                 self.save(models_dir=self.models_dir)
 
     def fit(self, triplets_txt, metadata_csv, save_dir):
@@ -437,7 +441,11 @@ class DCBR(Trainer):
 
                 # insert item_factors
                 for i, idx in enumerate(target_index):
-                    self.wrmf.wrmf.item_factors[idx] = pred[i]
+                    self.best_item_factors[idx] = pred[i]
+
+    def insert_best_factors(self):
+        """Insert best item factors."""
+        self.wrmf.wrmf.item_factors = self.best_item_factors
 
     def score(self, users, split):
         """
@@ -745,25 +753,16 @@ class DCUE(Trainer):
             self.optimizer.step()
 
             # compute train loss
-            batch_size = pos.size()[0]
-            preds_size = preds.numel()
+            samples_processed += pos.size()[0]
+            losses_processed += preds.numel()
 
-            samples_processed += batch_size
-            losses_processed += preds_size
-
-            train_loss += loss.item() * preds_size
+            train_loss += loss.item() * preds.numel()
 
             # report AUC mid epoch
             if samples_processed / (len(self.train_data) * 0.34) > k:
                 # compute auc estimate.  Gives +/- approx 0.017 @ 95%
                 # confidence w/ 20K users.
-                print("Initializing AUC computation...")
-                self._user_factors()
-                self._item_factors()
-                users = list(self.val_data.dh.user_index.keys())
-                n_users = len(users)
-                users_sample = np.random.choice(users, int(n_users * 0.025))
-                val_auc = self.score(users_sample, 'val')
+                val_auc = self._compute_auc('val', pct=0.025)
 
                 # report
                 print("Epoch: [{}/{}]\tSamples: [{}/{}]\t\
@@ -772,20 +771,7 @@ class DCUE(Trainer):
                            len(self.train_data), val_auc))
                 k += 1
 
-                if val_auc > self.best_auc:
-                    self.best_auc = val_auc
-
-                    if self.best_item_factors is None or \
-                       self.best_user_factors is None:
-                        self.best_item_factors = torch.zeros_like(
-                            self.item_factors)
-                        self.best_user_factors = torch.zeros_like(
-                            self.user_factors)
-
-                    self.best_item_factors.copy_(self.item_factors)
-                    self.best_user_factors.copy_(self.user_factors)
-                    
-                    self.save(models_dir=self.model_dir)
+                self._update_best(val_auc)
 
         train_loss /= losses_processed
 
@@ -824,13 +810,10 @@ class DCUE(Trainer):
                 loss = self.loss_func(preds, y.expand(-1, self.neg_batch_size))
 
                 # compute loss
-                batch_size = pos.size()[0]
-                preds_size = preds.numel()
+                samples_processed += pos.size()[0]
+                losses_processed += preds.numel()
 
-                samples_processed += batch_size
-                losses_processed += preds_size
-
-                val_loss += loss.item() * preds_size
+                val_loss += loss.item() * preds.numel()
 
             val_loss /= losses_processed
 
@@ -885,7 +868,6 @@ class DCUE(Trainer):
 
         # init training variables
         train_loss = 0
-        best_loss = float('inf')
         samples_processed = 0
         self.best_auc = 0
 
@@ -904,13 +886,7 @@ class DCUE(Trainer):
 
                 # compute auc estimate.  Gives +/- approx 0.017 @ 95%
                 # confidence w/ 20K users.
-                print("Initializing AUC computation...")
-                self._user_factors()
-                self._item_factors()
-                users = list(self.val_data.dh.user_index.keys())
-                n_users = len(users)
-                users_sample = np.random.choice(users, int(n_users * 0.025))
-                val_auc = self.score(users_sample, 'val')
+                val_auc = self._compute_auc('val', pct=0.025)
 
                 # report
                 print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss: \
@@ -919,19 +895,7 @@ class DCUE(Trainer):
                     len(self.train_data)*self.num_epochs, train_loss,
                     val_loss, val_auc))
 
-            if val_auc > self.best_auc:
-                self.best_auc = val_auc
-
-                if self.best_item_factors is None or \
-                   self.best_user_factors is None:
-                    self.best_item_factors = torch.zeros_like(
-                        self.item_factors)
-                    self.best_user_factors = torch.zeros_like(
-                        self.user_factors)
-
-                self.best_item_factors.copy_(self.item_factors)
-                self.best_user_factors.copy_(self.user_factors)
-                self.save(models_dir=self.model_dir)
+            self._update_best(val_auc)
 
     def score(self, users, split):
         """
@@ -1004,6 +968,45 @@ class DCUE(Trainer):
             return scores, targets
 
         return None, None
+
+    def insert_best_factors(self):
+        """Insert the best factors for predictions."""
+        self.item_factors = self.best_item_factors
+        self.user_factors = self.best_user_factors
+
+    def _update_best(self, val_auc):
+
+        if val_auc > self.best_auc:
+            self.best_auc = val_auc
+
+            if self.best_item_factors is None or \
+               self.best_user_factors is None:
+                self.best_item_factors = torch.zeros_like(
+                    self.item_factors)
+                self.best_user_factors = torch.zeros_like(
+                    self.user_factors)
+
+            self.best_item_factors.copy_(self.item_factors)
+            self.best_user_factors.copy_(self.user_factors)
+
+            self.save(models_dir=self.model_dir)
+
+    def _compute_auc(self, split, pct=0.025):
+        print("Initializing AUC computation...")
+        self._user_factors()
+        self._item_factors()
+
+        if split == 'train':
+            users = list(self.train_data.dh.user_index.keys())
+        elif split == 'val':
+            users = list(self.val_data.dh.user_index.keys())
+        elif split == 'test':
+            users = list(self.test_data.dh.user_index.keys())
+
+        n_users = len(users)
+        users_sample = np.random.choice(users, int(n_users * 0.025))
+
+        return self.score(users_sample, split)
 
     def _user_factors(self):
         """Create user factors matrix."""

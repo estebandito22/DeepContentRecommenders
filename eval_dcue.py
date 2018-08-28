@@ -19,6 +19,7 @@ def main(model_dir, epoch, eval_pct):
     users_sample = np.random.choice(users, int(n_users * eval_pct))
 
     # Compute AUC
+    dcue.insert_best_factors()
     dcue.score(users_sample, 'test')
 
 

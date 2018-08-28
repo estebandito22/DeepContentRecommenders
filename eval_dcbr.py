@@ -22,7 +22,7 @@ def main(model_dir, epoch, eval_pct):
     cf_score = dcbr.score(users_sample, 'test')
 
     # evaluate nn model
-    dcbr.insert_nn_factors()
+    dcbr.insert_best_factors()
     nn_score = dcbr.score(users_sample, 'test')
 
     print("CF Model AUC: {}\tNN Model AUC: {}".format(cf_score, nn_score))
