@@ -95,4 +95,4 @@ def set_gcc():
 
 
 set_gcc()
-setup(ext_modules=define_extensions(use_cython))
+setup(name='CFEvaluators', ext_modules=define_extensions(use_cython))

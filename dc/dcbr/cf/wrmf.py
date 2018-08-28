@@ -1,6 +1,5 @@
 """Class for training a Recommendation Model using the Implicit library."""
 
-import os
 import numpy as np
 from implicit.als import AlternatingLeastSquares
 

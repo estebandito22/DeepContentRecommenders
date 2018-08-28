@@ -1011,6 +1011,7 @@ class DCUE(Trainer):
     def _user_factors(self):
         """Create user factors matrix."""
         self.user_factors = torch.zeros([self.n_users, self.feature_dim])
+        self.model.eval()
         with torch.no_grad():
             for i in list(self.item_data.dh.user_index.values()):
                 emb_idx = torch.LongTensor([i])
@@ -1027,6 +1028,7 @@ class DCUE(Trainer):
         self.item_factors = torch.zeros(
             [len(self.item_data.songid2metaindex), self.feature_dim])
 
+        self.model.eval()
         with torch.no_grad():
             for batch_samples in item_loader:
                 pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)

@@ -12,8 +12,8 @@ class DCBRDataset(Dataset):
 
     """Class to load dataset required for training DCBR model."""
 
-    def __init__(self, metadata_csv, item_index, split='train', transform=None,
-                 excluded_ids=None, data_type='scatter'):
+    def __init__(self, metadata_csv, item_index=None, split='train',
+                 transform=None, excluded_ids=None, data_type='scatter'):
         """
         Initialize MSDDataset.
 
@@ -39,6 +39,7 @@ class DCBRDataset(Dataset):
         if self.excluded_ids is not None:
             self.metadata = self.metadata[
                 ~self.metadata['song_id'].isin(self.excluded_ids)]
+            self.metadata = self.metadata.reset_index(drop=True)
 
         # create train and val and test splits
         np.random.seed(10)
@@ -115,6 +116,7 @@ class DCBRPredset(Dataset):
         if self.excluded_ids is not None:
             self.metadata = self.metadata[
                 ~self.metadata['song_id'].isin(self.excluded_ids)]
+            self.metadata = self.metadata.reset_index(drop=True)
 
         # create train and val and test splits
         if self.split == 'train':
@@ -183,9 +185,9 @@ class DCUEDataset(Dataset):
 
     """Class for loading dataset required to train DCUE model."""
 
-    def __init__(self, triplets_txt, metadata_csv, neg_samples, split,
-                 data_type, n_users=20000, n_items=10000, transform=None,
-                 excluded_ids=None):
+    def __init__(self, triplets_txt, metadata_csv, neg_samples=0,
+                 split='train', data_type='mel', n_users=20000, n_items=10000,
+                 transform=None, excluded_ids=None):
         """
         Initialize DCUE dataset.
 
@@ -213,6 +215,7 @@ class DCUEDataset(Dataset):
         if self.excluded_ids is not None:
             self.metadata = self.metadata[
                 ~self.metadata['song_id'].isin(excluded_ids)]
+            self.metadata = self.metadata.reset_index(drop=True)
 
         # load taste profile dataset
         self.dh = CFDataHandler(triplets_txt)
@@ -331,12 +334,12 @@ class DCUEDataset(Dataset):
         return sample
 
 
-class DCUEPredset(Dataset):
+class DCUEPredset(DCUEDataset):
 
     """Class to load data for predicting DCUE model."""
 
-    def __init__(self, triplets_txt, metadata_csv, split, data_type,
-                 n_users=20000, n_items=10000, transform=None,
+    def __init__(self, triplets_txt, metadata_csv, split='train',
+                 data_type='mel', n_users=20000, n_items=10000, transform=None,
                  excluded_ids=None):
         """
         Initialize DCUE dataset for predictions.
@@ -352,67 +355,10 @@ class DCUEPredset(Dataset):
             transform: A method that transforms the sample.
             excluded_ids: List of audio file ids to exclude from dataset.
         """
-        self.triplets_txt = triplets_txt
-        self.metadata_csv = metadata_csv
-        self.split = split
-        self.data_type = data_type
-        self.transform = transform
-        self.excluded_ids = excluded_ids
-
-        # load metadata and exclude ids
-        self.metadata = pd.read_csv(metadata_csv)
-        if self.excluded_ids is not None:
-            self.metadata = self.metadata[
-                ~self.metadata['song_id'].isin(excluded_ids)]
-
-        # load taste profile dataset
-        self.dh = CFDataHandler(triplets_txt)
-
-        # limit taste df to songs with audio only
-        self.dh.triplets_df = self.dh.triplets_df[
-            self.dh.triplets_df['song_id'].isin(self.metadata['song_id'])]
-
-        # limit taste df to most frequent songs and users
-        top_items = self.dh.triplets_df.groupby(
-            'song_id').count().nlargest(n_items, 'user_id').index.values
-        top_users = self.dh.triplets_df.groupby(
-            'user_id').count().nlargest(n_users, 'song_id').index.values
-        top_items_mask = self.dh.triplets_df['song_id'].isin(top_items)
-        top_users_mask = self.dh.triplets_df['user_id'].isin(top_users)
-        self.dh.triplets_df = self.dh.triplets_df[
-            (top_items_mask) & (top_users_mask)]
-
-        # build item_user sparse matrix for quick item lookups
-        self.dh.item_user_matrix()
-
-        # lookup tables
-        self.songid2metaindex = {v: k for (k, v)
-                                 in self.metadata['song_id'].to_dict().items()}
-        self.itemindex2songid = {v: k for (k, v)
-                                 in self.dh.item_index.items()}
-
-        # build all items to sample from
-        self.n_items = self.dh.item_user.shape[0]
-        self.n_users = self.dh.item_user.shape[1]
-        self.all_items = np.arange(0, self.n_items)
-
-        # Unique songs for creating user dataset
-        self.triplets_df_uniq_songs = self.dh.triplets_df['song_id'].unique()
-
-        # create train and val and test splits
-        np.random.seed(10)
-        train_mask = np.random.rand(self.dh.triplets_df.shape[0]) < 0.90
-        np.random.seed(10)
-        val_mask = np.random.rand(sum(train_mask)) < 0.2/0.9
-
-        if self.split == 'train':
-            self.dh.triplets_df = self.dh.triplets_df[train_mask]
-            self.dh.triplets_df = self.dh.triplets_df[~val_mask]
-        elif self.split == 'val':
-            self.dh.triplets_df = self.dh.triplets_df[train_mask]
-            self.dh.triplets_df = self.dh.triplets_df[val_mask]
-        elif self.split == 'test':
-            self.dh.triplets_df = self.dh.triplets_df[~train_mask]
+        DCUEDataset.__init__(
+            self, triplets_txt, metadata_csv, split=split, data_type=data_type,
+            n_users=n_users, n_items=n_items, transform=transform,
+            excluded_ids=excluded_ids)
 
         # user data sets
         self.triplets_df_user = self.dh.triplets_df
@@ -465,6 +411,7 @@ class DCUEPredset(Dataset):
         pos_song_idx = self.songid2metaindex[pos_song_id]
 
         user_idx = self.dh.user_index[self.triplets_df_user.iloc[i]['user_id']]
+        user_idx = torch.tensor(user_idx)
 
         score = self.triplets_df_user.iloc[i]['score']
         if score > 0:
@@ -479,11 +426,11 @@ class DCUEPredset(Dataset):
         return sample
 
 
-class DCUEItemset(Dataset):
+class DCUEItemset(DCUEDataset):
 
     """Class for loading dataset required to train DCUE model."""
 
-    def __init__(self, triplets_txt, metadata_csv, data_type,
+    def __init__(self, triplets_txt, metadata_csv, data_type='mel',
                  n_users=20000, n_items=10000, transform=None,
                  excluded_ids=None):
         """
@@ -499,57 +446,14 @@ class DCUEItemset(Dataset):
             transform: A method that transforms the sample.
             excluded_ids: List of audio file ids to exclude from dataset.
         """
-        self.triplets_txt = triplets_txt
-        self.metadata_csv = metadata_csv
-        self.data_type = data_type
-        self.transform = transform
-        self.excluded_ids = excluded_ids
-
-        # load metadata and exclude ids
-        self.metadata = pd.read_csv(metadata_csv)
-        if self.excluded_ids is not None:
-            self.metadata = self.metadata[
-                ~self.metadata['song_id'].isin(excluded_ids)]
-
-        # load taste profile dataset
-        self.dh = CFDataHandler(triplets_txt)
-
-        # limit taste df to songs with audio only
-        self.dh.triplets_df = self.dh.triplets_df[
-            self.dh.triplets_df['song_id'].isin(self.metadata['song_id'])]
-
-        # limit taste df to most frequent songs and users
-        top_items = self.dh.triplets_df.groupby(
-            'song_id').count().nlargest(n_items, 'user_id').index.values
-        top_users = self.dh.triplets_df.groupby(
-            'user_id').count().nlargest(n_users, 'song_id').index.values
-        top_items_mask = self.dh.triplets_df['song_id'].isin(top_items)
-        top_users_mask = self.dh.triplets_df['user_id'].isin(top_users)
-        self.dh.triplets_df = self.dh.triplets_df[
-            (top_items_mask) & (top_users_mask)]
-
-        # build item_user sparse matrix for quick item lookups
-        self.dh.item_user_matrix()
-
-        # lookup tables
-        self.songid2metaindex = {v: k for (k, v)
-                                 in self.metadata['song_id'].to_dict().items()}
-        self.itemindex2songid = {v: k for (k, v)
-                                 in self.dh.item_index.items()}
-
-        # build all items to sample from
-        self.n_items = self.dh.item_user.shape[0]
-        self.n_users = self.dh.item_user.shape[1]
+        DCUEDataset.__init__(
+            self, triplets_txt, metadata_csv, data_type=data_type,
+            n_users=n_users, n_items=n_items, transform=transform,
+            excluded_ids=excluded_ids)
 
         # filter metadata to only top items
         self.metadata = self.metadata[
             self.metadata['song_id'].isin(list(self.dh.item_index.keys()))]
-
-    @staticmethod
-    def _sample(X, length):
-        rand_start = np.random.randint(0, X.size()[0] - length)
-        X = X[rand_start:rand_start + length]
-        return X
 
     def __len__(self):
         """Return length of the dataset."""
@@ -593,6 +497,37 @@ class ToTensor(object):
             targets = torch.from_numpy(targets).float()
 
         return {'data': inputs, 'target': targets}
+
+
+class SubtractMean(object):
+
+    """Subtract mean from audio input."""
+
+    def __init__(self, data_type):
+        """Initialize SubtractMean."""
+        if data_type == 'mel' or data_type == 'scatter':
+            self.data_type = data_type
+        else:
+            raise ValueError("data_type must be 'mel' or 'scatter'.")
+
+    def __call__(self, sample):
+        """Subtract the appropriate mean from the sample data."""
+        if self.data_type == 'mel':
+            mean = 22
+        elif self.data_type == 'scatter':
+            mean = 21
+
+        if 'data' in sample:
+            key = 'data'
+            inputs = sample['data']
+        elif 'pos' in sample:
+            key = 'pos'
+            inputs = sample['pos']
+
+        inputs -= mean
+        sample[key] = inputs
+
+        return sample
 
 
 class RandomSample(object):
