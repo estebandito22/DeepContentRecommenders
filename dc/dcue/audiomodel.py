@@ -220,7 +220,7 @@ class ConvNetMel2(nn.Module):
                     the embedding dimension of the feature vectors for both
                     users and songs.
         """
-        super(ConvNetMel, self).__init__()
+        super(ConvNetMel2, self).__init__()
         self.output_size = dict_args["output_size"]
         self.bn_momentum = dict_args["bn_momentum"]
         # input_size = batch size x 1 x 128 x 44
