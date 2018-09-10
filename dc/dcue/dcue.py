@@ -12,6 +12,7 @@ import torch.nn as nn
 
 from dc.dcue.audiomodel import ConvNetScatter
 from dc.dcue.audiomodel import ConvNetMel
+from dc.dcue.audiomodel import ConvNetMel2
 
 from dc.dcue.userembedding import UserEmbeddings
 
@@ -40,15 +41,18 @@ class DCUENet(nn.Module):
         self.user_embdim = dict_args["user_embdim"]
         self.user_count = dict_args["user_count"]
         self.bn_momentum = dict_args["bn_momentum"]
+        self.model_type = dict_args["model_type"]
 
         # convnet arguments
         dict_args = {'output_size': self.feature_dim,
                      'bn_momentum': self.bn_momentum}
 
-        if self.data_type == 'scatter':
+        if self.model_type == 'scatter':
             self.conv = ConvNetScatter(dict_args)
-        elif self.data_type == 'mel':
+        elif self.model_type == 'mel':
             self.conv = ConvNetMel(dict_args)
+        elif self.model_type == 'mel2':
+            self.conv = ConvNetMel2(dict_args)
 
         # user embedding arguments
         dict_args = {'user_embdim': self.user_embdim,
@@ -95,11 +99,12 @@ if __name__ == '__main__':
 
     truth = torch.ones([2, 1])*-1
 
-    dict_argstest = {'output_size': 100}
+    dict_argstest = {'output_size': 100, 'bn_momentum': 0.5}
     conv = ConvNetScatter(dict_argstest)
     sim = nn.CosineSimilarity(dim=1)
 
     utest = torch.ones([2, 100])*7
+    utest[0] *= 2
 
     postest = torch.ones([2, 1, 441, 17])
     postest[0] *= 3
@@ -108,8 +113,8 @@ if __name__ == '__main__':
     pos_featvectstest = conv(postest)
     pos_scorestest = sim(utest, pos_featvectstest)
 
-    negtest = torch.ones([2, 3, 1, 441, 17])
-    negtest[0] *= 2
+    negtest = torch.rand([2, 3, 1, 441, 17])
+    negtest[0] *= 3
     negtest = negtest.view([6, 1, 441, 17])
 
     neg_featvectstest = conv(negtest)
@@ -121,13 +126,13 @@ if __name__ == '__main__':
     scorestest = pos_scorestest.view(
         pos_scorestest.size()[0], 1) - neg_scorestest
 
-    scorestest[1,0] = 1
-    scorestest[1,1] = 2
-    scorestest[1,2] = 2
-    scorestest[0,0] = 1
-    scorestest[0,1] = 2
-    scorestest[0,2] = 2
+    scorestest[1, 0] = 0
+    scorestest[1, 1] = 2
+    scorestest[1, 2] = 2
+    scorestest[0, 0] = -1
+    scorestest[0, 1] = 2
+    scorestest[0, 2] = 2
 
     loss = nn.HingeEmbeddingLoss(0.2)
 
-    loss(scorestest, truth)
+    loss(scorestest, truth.expand(-1, 3))

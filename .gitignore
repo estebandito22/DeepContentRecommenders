@@ -47,6 +47,7 @@ __init__.py
 build
 dist
 DeepContentRecommenders.egg-info
+dc/deprecated
 
 # Data Files #
 ##############

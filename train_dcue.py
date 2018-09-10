@@ -7,11 +7,12 @@ from dc.deep_content import DCUE
 
 def main(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
          beta_one, beta_two, eps, weight_decay, num_epochs, bn_momentum,
-         data_type, n_users, n_items, triplets_txt, metadata_csv, save_dir):
+         model_type, data_type, n_users, n_items, triplets_txt, metadata_csv,
+         save_dir):
     """Train DCUE model."""
     dcue = DCUE(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
                 beta_one, beta_two, eps, weight_decay, num_epochs, bn_momentum,
-                data_type, n_users, n_items)
+                model_type, data_type, n_users, n_items)
 
     dcue.fit(triplets_txt, metadata_csv, save_dir)
 
@@ -66,6 +67,8 @@ if __name__ == '__main__':
                     help="Number of epochs to train")
     ap.add_argument("-bm", "--bn_momentum", type=float,
                     help="Momentum for Batch Normalization.")
+    ap.add_argument("-mt", "--model_type",
+                    help="scatter or mel or mel2")
     ap.add_argument("-dt", "--data_type",
                     help="scatter or mel")
     ap.add_argument("-nu", "--n_users", type=int, default=20000,
@@ -93,6 +96,7 @@ if __name__ == '__main__':
          args['weight_decay'],
          args['num_epochs'],
          args['bn_momentum'],
+         args['model_type'],
          args['data_type'],
          args['n_users'],
          args['n_items'],

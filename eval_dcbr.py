@@ -1,5 +1,7 @@
 """Script to evaluate DCBR model."""
 
+import os
+
 from argparse import ArgumentParser
 
 import numpy as np
@@ -25,6 +27,7 @@ def main(model_dir, epoch, eval_pct):
     dcbr.insert_best_factors()
     nn_score = dcbr.score(users_sample, 'test')
 
+    print("Model: {}".format(os.path.join(model_dir, str(epoch))))
     print("CF Model AUC: {}\tNN Model AUC: {}".format(cf_score, nn_score))
 
 

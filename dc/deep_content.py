@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 import os
 import datetime
+from collections import defaultdict
 
 import numpy as np
 
@@ -15,8 +16,6 @@ from torch.utils.data import DataLoader
 
 from sklearn.metrics import roc_auc_score
 
-from torchvision.transforms import Compose
-
 from dc.dcbr.cf.wrmf import WRMF
 from dc.dcbr.cf.datahandler import CFDataHandler
 from dc.dcbr.cf.evaluators import cross_validate
@@ -27,7 +26,7 @@ from dc.pytorchdatasets import DCUEDataset
 from dc.pytorchdatasets import DCUEPredset
 from dc.pytorchdatasets import DCUEItemset
 
-from dc.pytorchdatasets import ToTensor
+from dc.pytorchdatasets import SubtractMean
 
 from dc.dcbr.dcbr import DCBRNet
 from dc.dcue.dcue import DCUENet
@@ -364,8 +363,10 @@ class DCBR(Trainer):
         self.metadata_csv = metadata_csv
 
         # load data sets, create data loaders and initializer model
-        self.load_nn_dataset(split='train')
-        self.load_nn_dataset(split='val')
+        self.load_nn_dataset(
+            split='train', transform=SubtractMean(self.data_type))
+        self.load_nn_dataset(
+            split='val', transform=SubtractMean(self.data_type))
 
         train_loader = DataLoader(
             self.nn_train_data, batch_size=self.batch_size, shuffle=True,
@@ -418,7 +419,8 @@ class DCBR(Trainer):
 
     def insert_nn_factors(self):
         """Build learned item factor matrix."""
-        self.load_nn_dataset(split='all')
+        self.load_nn_dataset(
+            split='all', transform=SubtractMean(self.data_type))
 
         all_loader = DataLoader(
             self.nn_all_data, batch_size=self.batch_size, shuffle=False,
@@ -457,7 +459,7 @@ class DCBR(Trainer):
         """
         self.nn_model.eval()
 
-        self.load_pred_dataset(split)
+        self.load_pred_dataset(split, transform=SubtractMean(self.data_type))
 
         auc = []
         for user_id in users:
@@ -481,7 +483,7 @@ class DCBR(Trainer):
         if self.nn_pred_data.user_has_songs:
 
             pred_loader = DataLoader(
-                self.nn_pred_data, batch_size=self.batch_size, shuffle=False,
+                self.nn_pred_data, batch_size=1024, shuffle=False,
                 num_workers=4)
 
             with torch.no_grad():
@@ -571,8 +573,8 @@ class DCUE(Trainer):
     def __init__(self, feature_dim=100, batch_size=64, neg_batch_size=20,
                  u_embdim=300, margin=0.2, lr=0.00001, beta_one=0.9,
                  beta_two=0.99, eps=1e-8, weight_decay=0, num_epochs=100,
-                 bn_momentum=0.5, data_type='mel', n_users=20000,
-                 n_items=10000):
+                 bn_momentum=0.5, model_type='mel', data_type='mel',
+                 n_users=20000, n_items=10000, eval_pct=0.025):
         """
         Initialize DCUE model.
 
@@ -609,9 +611,11 @@ class DCUE(Trainer):
         self.weight_decay = weight_decay
         self.num_epochs = num_epochs
         self.bn_momentum = bn_momentum
+        self.model_type = model_type
         self.data_type = data_type
         self.n_users = n_users
         self.n_items = n_items
+        self.eval_pct = eval_pct
 
         # Dataset attributes
         self.model_dir = None
@@ -637,6 +641,7 @@ class DCUE(Trainer):
         self.best_item_factors = None
         self.best_user_factors = None
         self.best_auc = None
+        self.best_val_loss = float('inf')
 
         if torch.cuda.is_available():
             self.USE_CUDA = True
@@ -662,14 +667,14 @@ class DCUE(Trainer):
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids)
+                excluded_ids=excluded_ids, random_seed=10)
 
         elif split == 'test':
             self.test_data = DCUEDataset(
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids)
+                excluded_ids=excluded_ids, random_seed=10)
 
     def load_pred_dataset(self, split, transform=None, excluded_ids=None):
         """
@@ -684,7 +689,7 @@ class DCUE(Trainer):
             self.triplets_txt, self.metadata_csv, split,
             data_type=self.data_type, n_users=self.n_users,
             n_items=self.n_items, transform=transform,
-            excluded_ids=excluded_ids)
+            excluded_ids=excluded_ids, random_seed=10)
 
     def load_item_dataset(self, transform=None, excluded_ids=None):
         """
@@ -697,7 +702,7 @@ class DCUE(Trainer):
         self.item_data = DCUEItemset(
             self.triplets_txt, self.metadata_csv, data_type=self.data_type,
             n_users=self.n_users, n_items=self.n_items, transform=transform,
-            excluded_ids=excluded_ids)
+            excluded_ids=excluded_ids, random_seed=10)
 
     def _init_nn(self):
         """Initialize the nn model for training."""
@@ -705,11 +710,12 @@ class DCUE(Trainer):
                           'feature_dim': self.feature_dim,
                           'user_embdim': self.u_embdim,
                           'user_count': self.train_data.n_users,
-                          'bn_momentum': self.bn_momentum}
+                          'bn_momentum': self.bn_momentum,
+                          'model_type': self.model_type}
 
         self.model = DCUENet(self.dict_args)
 
-        self.loss_func = nn.MSELoss()
+        self.loss_func = nn.HingeEmbeddingLoss(margin=self.margin)
         self.optimizer = optim.Adam(
             self.model.parameters(), self.lr,
             (self.beta_one, self.beta_two),
@@ -725,7 +731,6 @@ class DCUE(Trainer):
         train_loss = 0
         samples_processed = 0
         losses_processed = 0
-        k = 1
 
         for batch_samples in loader:
 
@@ -758,21 +763,6 @@ class DCUE(Trainer):
 
             train_loss += loss.item() * preds.numel()
 
-            # report AUC mid epoch
-            if samples_processed / (len(self.train_data) * 0.34) > k:
-                # compute auc estimate.  Gives +/- approx 0.017 @ 95%
-                # confidence w/ 20K users.
-                val_auc = self._compute_auc('val', pct=0.025)
-
-                # report
-                print("Epoch: [{}/{}]\tSamples: [{}/{}]\t\
-                       Validation AUC: {}".format(
-                           self.nn_epoch, self.num_epochs, samples_processed,
-                           len(self.train_data), val_auc))
-                k += 1
-
-                self._update_best(val_auc)
-
         train_loss /= losses_processed
 
         return samples_processed, train_loss
@@ -801,15 +791,12 @@ class DCUE(Trainer):
                     pos = pos.cuda()
                     neg = neg.cuda()
 
-                # clear gradients
-                self.model.zero_grad()
-
                 # forward pass
                 preds = self.model(u, pos, neg)
 
+                # compute loss
                 loss = self.loss_func(preds, y.expand(-1, self.neg_batch_size))
 
-                # compute loss
                 samples_processed += pos.size()[0]
                 losses_processed += preds.numel()
 
@@ -817,7 +804,7 @@ class DCUE(Trainer):
 
             val_loss /= losses_processed
 
-            return samples_processed, val_loss
+        return samples_processed, val_loss
 
     def fit(self, triplets_txt, metadata_csv, save_dir):
         """
@@ -840,6 +827,7 @@ class DCUE(Trainer):
                EPS: {}\n\
                Weight Decay: {}\n\
                Num Epochs: {}\n\
+               Model Type: {}\n\
                Data Type: {}\n\
                Num Users: {}\n\
                Num Items: {}\n\
@@ -847,22 +835,29 @@ class DCUE(Trainer):
                    self.feature_dim, self.batch_size, self.neg_batch_size,
                    self.u_embdim, self.margin, self.lr, self.beta_one,
                    self.beta_two, self.eps, self.weight_decay, self.num_epochs,
-                   self.data_type, self.n_users, self.n_items, save_dir))
+                   self.model_type, self.data_type, self.n_users, self.n_items,
+                   save_dir))
 
         self.model_dir = save_dir
         self.metadata_csv = metadata_csv
         self.triplets_txt = triplets_txt
 
         print("Loading datasets...")
-        self.load_dataset(split='train')
-        self.load_dataset(split='val')
-        self.load_item_dataset()
+        self.load_dataset(
+            split='train', transform=SubtractMean(self.data_type))
+        self.load_dataset(
+            split='val', transform=SubtractMean(self.data_type))
+        self.load_item_dataset(transform=SubtractMean(self.data_type))
+        self.load_pred_dataset(
+            split='val', transform=SubtractMean(self.data_type))
 
         train_loader = DataLoader(
             self.train_data, batch_size=self.batch_size, shuffle=True,
             num_workers=4)
         val_loader = DataLoader(
             self.val_data, batch_size=self.batch_size, num_workers=4)
+        pred_loader = DataLoader(
+            self.pred_data, batch_size=1024, num_workers=4)
 
         self._init_nn()
 
@@ -870,6 +865,7 @@ class DCUE(Trainer):
         train_loss = 0
         samples_processed = 0
         self.best_auc = 0
+        self.best_val_loss = float('inf')
 
         # train loop
         for epoch in range(self.num_epochs + 1):
@@ -886,7 +882,8 @@ class DCUE(Trainer):
 
                 # compute auc estimate.  Gives +/- approx 0.017 @ 95%
                 # confidence w/ 20K users.
-                val_auc = self._compute_auc('val', pct=0.025)
+                val_auc = self._compute_auc(
+                    'val', pred_loader, pct=self.eval_pct)
 
                 # report
                 print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss: \
@@ -895,9 +892,9 @@ class DCUE(Trainer):
                     len(self.train_data)*self.num_epochs, train_loss,
                     val_loss, val_auc))
 
-            self._update_best(val_auc)
+            self._update_best(val_auc, val_loss)
 
-    def score(self, users, split):
+    def score(self, users, loader, k=10000):
         """
         Score the model with AUC.
 
@@ -907,40 +904,79 @@ class DCUE(Trainer):
         """
         self.model.eval()
 
-        self.load_pred_dataset(split)
-
         auc = []
         for user_id in users:
-            scores, targets = self.predict(user_id, split)
+            scores, targets = self.predict(user_id, loader)
 
             if (scores is not None) and (targets is not None):
-                auc += [roc_auc_score(targets, scores)]
+                scores, targets = list(zip(
+                    *sorted(zip(scores, targets), key=lambda x: -x[0])))
 
-        final_auc = np.mean(auc)
-        return final_auc
+                scores = scores[:k]
+                targets = targets[:k]
 
-    def predict(self, user, split):
+                if sum(targets) == len(targets):
+                    auc += [1]
+                elif sum(targets) == 0:
+                    auc += [0]
+                else:
+                    auc += [roc_auc_score(targets, scores)]
+
+        return np.mean(auc)
+
+    # def predict(self, user, loader):
+    #     """
+    #     Predict for a user.
+    #
+    #     Args
+    #         user: a user id
+    #     """
+    #     loader.dataset.create_user_data(user)
+    #     self.model.eval()
+    #
+    #     if loader.dataset.user_has_songs:
+    #
+    #         with torch.no_grad():
+    #             scores = []
+    #             targets = []
+    #             pos_scores = []
+    #             neg_scores = []
+    #             for batch_samples in loader:
+    #
+    #                 u = batch_samples['u']
+    #                 pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
+    #                 y = batch_samples['y'].float()
+    #
+    #                 if self.USE_CUDA:
+    #                     u = u.cuda()
+    #                     pos = pos.cuda()
+    #
+    #                 if pos.size()[0] > 1:
+    #                     # forward pass
+    #                     score = self.model(u, pos).squeeze(1)
+    #                     scores += score.cpu().numpy().tolist()
+    #                     targets += y.numpy().tolist()
+    #
+    #         return scores, targets
+    #
+    #     return None, None
+
+    def predict(self, user, loader):
         """
         Predict for a user.
 
         Args
             user: a user id
-            split: 'train' or 'test'
         """
-        self.pred_data.create_user_data(user)
+        loader.dataset.create_user_data(user)
+        self.model.eval()
 
-        if self.pred_data.user_has_songs:
-
-            pred_loader = DataLoader(
-                self.pred_data, batch_size=self.batch_size, shuffle=False,
-                num_workers=4)
-
-            self.model.eval()
+        if loader.dataset.user_has_songs:
 
             with torch.no_grad():
                 scores = []
                 targets = []
-                for batch_samples in pred_loader:
+                for batch_samples in loader:
 
                     u = []
                     for idx in batch_samples['u']:
@@ -960,8 +996,7 @@ class DCUE(Trainer):
                             i = i.cuda()
 
                         # forward pass
-                        score = F.cosine_similarity(u, i)
-
+                        score = self.model.sim(u, i)
                         scores += score.cpu().numpy().tolist()
                         targets += y.numpy().tolist()
 
@@ -974,7 +1009,7 @@ class DCUE(Trainer):
         self.item_factors = self.best_item_factors
         self.user_factors = self.best_user_factors
 
-    def _update_best(self, val_auc):
+    def _update_best(self, val_auc, val_loss):
 
         if val_auc > self.best_auc:
             self.best_auc = val_auc
@@ -991,7 +1026,10 @@ class DCUE(Trainer):
 
             self.save(models_dir=self.model_dir)
 
-    def _compute_auc(self, split, pct=0.025):
+        if val_loss < self.best_val_loss:
+            self.best_val_loss = val_loss
+
+    def _compute_auc(self, split, loader, pct=0.025):
         print("Initializing AUC computation...")
         self._user_factors()
         self._item_factors()
@@ -1004,9 +1042,12 @@ class DCUE(Trainer):
             users = list(self.test_data.dh.user_index.keys())
 
         n_users = len(users)
-        users_sample = np.random.choice(users, int(n_users * 0.025))
+        if pct < 1:
+            users_sample = np.random.choice(users, int(n_users * pct))
+        else:
+            users_sample = users
 
-        return self.score(users_sample, split)
+        return self.score(users_sample, loader)
 
     def _user_factors(self):
         """Create user factors matrix."""
@@ -1014,7 +1055,7 @@ class DCUE(Trainer):
         self.model.eval()
         with torch.no_grad():
             for i in list(self.item_data.dh.user_index.values()):
-                emb_idx = torch.LongTensor([i])
+                emb_idx = torch.tensor([i])
                 if self.USE_CUDA:
                     emb_idx = emb_idx.cuda()
                 self.user_factors[i] = self.model.user_embd(emb_idx)
@@ -1051,9 +1092,10 @@ class DCUE(Trainer):
         """
         if (self.model is not None) and (models_dir is not None):
 
-            model_dir = "DCUE_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}".\
+            model_dir = "DCUE_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}_mt_{}".\
                 format(self.lr, self.beta_one, self.beta_two,
-                       self.weight_decay, self.n_users, self.n_items)
+                       self.weight_decay, self.n_users, self.n_items,
+                       self.model_type)
 
             if not os.path.isdir(os.path.join(models_dir, model_dir)):
                 os.makedirs(os.path.join(models_dir, model_dir))

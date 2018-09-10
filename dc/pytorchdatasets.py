@@ -1,5 +1,7 @@
 """Datasets for training models in PyTorch."""
 
+from collections import defaultdict
+
 import numpy as np
 import pandas as pd
 import torch
@@ -185,9 +187,9 @@ class DCUEDataset(Dataset):
 
     """Class for loading dataset required to train DCUE model."""
 
-    def __init__(self, triplets_txt, metadata_csv, neg_samples=0,
+    def __init__(self, triplets_txt, metadata_csv, neg_samples=None,
                  split='train', data_type='mel', n_users=20000, n_items=10000,
-                 transform=None, excluded_ids=None):
+                 transform=None, excluded_ids=None, random_seed=None):
         """
         Initialize DCUE dataset.
 
@@ -209,6 +211,7 @@ class DCUEDataset(Dataset):
         self.data_type = data_type
         self.transform = transform
         self.excluded_ids = excluded_ids
+        self.random_seed = random_seed
 
         # load metadata and exclude ids
         self.metadata = pd.read_csv(metadata_csv)
@@ -249,19 +252,28 @@ class DCUEDataset(Dataset):
         self.all_items = np.arange(0, self.n_items)
 
         # create train and val and test splits
+        uniq_songs = self.dh.triplets_df['song_id'].unique()
         np.random.seed(10)
-        train_mask = np.random.rand(self.dh.triplets_df.shape[0]) < 0.90
+        song_train_mask = np.random.rand(len(uniq_songs)) < 0.80
+        train_songs = uniq_songs[song_train_mask]
         np.random.seed(10)
-        val_mask = np.random.rand(sum(train_mask)) < 0.2/0.9
+        song_val_mask = np.random.rand(sum(song_train_mask)) < 0.1/0.8
+        val_songs = train_songs[song_val_mask]
 
         if self.split == 'train':
-            self.dh.triplets_df = self.dh.triplets_df[train_mask]
-            self.dh.triplets_df = self.dh.triplets_df[~val_mask]
+            self.dh.triplets_df = self.dh.triplets_df[
+                (self.dh.triplets_df['song_id'].isin(train_songs)) &
+                (~self.dh.triplets_df['song_id'].isin(val_songs))]
         elif self.split == 'val':
-            self.dh.triplets_df = self.dh.triplets_df[train_mask]
-            self.dh.triplets_df = self.dh.triplets_df[val_mask]
+            self.dh.triplets_df = self.dh.triplets_df[
+                self.dh.triplets_df['song_id'].isin(val_songs)]
         elif self.split == 'test':
-            self.dh.triplets_df = self.dh.triplets_df[~train_mask]
+            self.dh.triplets_df = self.dh.triplets_df[
+                ~self.dh.triplets_df['song_id'].isin(train_songs)]
+
+        self.uniq_songs = self.dh.triplets_df['song_id'].unique()
+        self.uniq_song_idxs = [self.dh.item_index[song_id] for
+                               song_id in self.uniq_songs]
 
     def _user_nonitem_songids(self, user_id):
         """
@@ -272,12 +284,17 @@ class DCUEDataset(Dataset):
         """
         i = self.dh.user_index[user_id]
         items = self.dh.item_user.getcol(i).nonzero()[0]
-        nonitems = self.all_items[~np.in1d(self.all_items, items)]
-        sample_nonitems = np.random.choice(nonitems, self.neg_samples)
-        return [self.itemindex2songid[idx] for idx in sample_nonitems]
+        nonitems = self.all_items[
+            (~np.in1d(self.all_items, items)) &
+            (np.in1d(self.all_items, self.uniq_song_idxs))]
+        np.random.seed()
+        if self.neg_samples is not None:
+            nonitems = np.random.choice(nonitems, self.neg_samples)
+        return [self.itemindex2songid[idx] for idx in nonitems]
 
-    @staticmethod
-    def _sample(X, length):
+    def _sample(self, X, length):
+        if self.random_seed is not None:
+            np.random.seed(self.random_seed)
         rand_start = np.random.randint(0, X.size()[0] - length)
         X = X[rand_start:rand_start + length]
         return X
@@ -340,7 +357,7 @@ class DCUEPredset(DCUEDataset):
 
     def __init__(self, triplets_txt, metadata_csv, split='train',
                  data_type='mel', n_users=20000, n_items=10000, transform=None,
-                 excluded_ids=None):
+                 excluded_ids=None, random_seed=None):
         """
         Initialize DCUE dataset for predictions.
 
@@ -358,11 +375,10 @@ class DCUEPredset(DCUEDataset):
         DCUEDataset.__init__(
             self, triplets_txt, metadata_csv, split=split, data_type=data_type,
             n_users=n_users, n_items=n_items, transform=transform,
-            excluded_ids=excluded_ids)
+            excluded_ids=excluded_ids, random_seed=random_seed)
 
         # user data sets
         self.triplets_df_user = self.dh.triplets_df
-        self.triplets_df_user_comp = None
         self.user_has_songs = False
 
     def _user_nonitem_songids(self, user_id):
@@ -375,6 +391,9 @@ class DCUEPredset(DCUEDataset):
         i = self.dh.user_index[user_id]
         items = self.dh.item_user.getcol(i).nonzero()[0]
         nonitems = self.all_items[~np.in1d(self.all_items, items)]
+        nonitems = self.all_items[
+            (~np.in1d(self.all_items, items)) &
+            (np.in1d(self.all_items, self.uniq_song_idxs))]
         return [self.itemindex2songid[idx] for idx in nonitems]
 
     def create_user_data(self, user_id):
@@ -385,21 +404,22 @@ class DCUEPredset(DCUEDataset):
             user_id: A user id from the triplets_txt data.
         """
         self.triplets_df_user = self.dh.triplets_df[
-            self.dh.triplets_df['user_id'] == user_id]
+            self.dh.triplets_df['user_id'] == user_id].copy()
 
         if not self.triplets_df_user.empty:
             self.user_has_songs = True
+            self.triplets_df_user['score'] = 1
         else:
             self.user_has_songs = False
 
         user_non_songs = self._user_nonitem_songids(user_id)
 
-        self.triplets_df_user_comp = pd.DataFrame(
+        triplets_df_user_comp = pd.DataFrame(
             {'user_id': [user_id]*len(user_non_songs),
              'song_id': user_non_songs,
              'score': [0]*len(user_non_songs)})
         self.triplets_df_user = pd.concat(
-            [self.triplets_df_user, self.triplets_df_user_comp])
+            [self.triplets_df_user, triplets_df_user_comp])
 
     def __len__(self):
         """Length of the user dataset."""
@@ -414,8 +434,6 @@ class DCUEPredset(DCUEDataset):
         user_idx = torch.tensor(user_idx)
 
         score = self.triplets_df_user.iloc[i]['score']
-        if score > 0:
-            score = 1.0
         y = torch.from_numpy(np.array(score)).float()
 
         sample = {'u': user_idx, 'y': y, 'pos_song_idx': pos_song_idx}
@@ -426,13 +444,120 @@ class DCUEPredset(DCUEDataset):
         return sample
 
 
+# class DCUEPredset(DCUEDataset):
+#
+#     """Class to load data for predicting DCUE model."""
+#
+#     def __init__(self, triplets_txt, metadata_csv,
+#                  split='train', data_type='mel', n_users=20000, n_items=10000,
+#                  transform=None, excluded_ids=None):
+#         """
+#         Initialize DCUE dataset for predictions.
+#
+#         Args
+#             triplets_txt: path to text file with triplets of fields.
+#                 user_id, song_id, score.
+#             metadata_csv: Path to csv with the metadata for audio files to be
+#                 loaded.
+#             neg_samples: The number of negative samples to draw.
+#             split: 'train', 'val' or 'test'.
+#             data_type: 'scatter' or 'mel'.
+#             transform: A method that transforms the sample.
+#             excluded_ids: List of audio file ids to exclude from dataset.
+#         """
+#         DCUEDataset.__init__(
+#             self, triplets_txt, metadata_csv,
+#             split=split, data_type=data_type,
+#             n_users=n_users, n_items=n_items, transform=transform,
+#             excluded_ids=excluded_ids)
+#
+#         # user data sets
+#         self.triplets_df_user = None
+#         self.triplets_df_user_comp = None
+#         self.user_has_songs = False
+#
+#     def _user_nonitem_songids(self, user_id):
+#         """
+#         Sample negative items for user.
+#
+#         Args
+#             user_id: a user id from the triplets_txt file.
+#         """
+#         i = self.dh.user_index[user_id]
+#         items = self.dh.item_user.getcol(i).nonzero()[0]
+#         nonitems = self.all_items[~np.in1d(self.all_items, items)]
+#         nonitems = self.all_items[
+#             (~np.in1d(self.all_items, items)) &
+#             (np.in1d(self.all_items, self.uniq_song_idxs))]
+#         return [self.itemindex2songid[idx] for idx in nonitems]
+#
+#     def create_user_data(self, user_id):
+#         """
+#         Build a user specific dataset to predict from.
+#
+#         Args
+#             user_id: A user id from the triplets_txt data.
+#         """
+#         self.triplets_df_user = self.dh.triplets_df[
+#             self.dh.triplets_df['user_id'] == user_id].copy()
+#
+#         if not self.triplets_df_user.empty:
+#             self.user_has_songs = True
+#             self.triplets_df_user['score'] = 1
+#         else:
+#             self.user_has_songs = False
+#
+#         user_non_songs = self._user_nonitem_songids(user_id)
+#
+#         self.triplets_df_user_comp = pd.DataFrame(
+#             {'user_id': [user_id]*len(user_non_songs),
+#              'song_id': user_non_songs,
+#              'score': [0]*len(user_non_songs)})
+#         self.triplets_df_user = pd.concat(
+#             [self.triplets_df_user, self.triplets_df_user_comp])
+#
+#     def __len__(self):
+#         """Length of the user dataset."""
+#         return self.triplets_df_user.shape[0]
+#
+#     def __getitem__(self, i):
+#         """Return sample from the user dataset."""
+#         pos_song_id = self.triplets_df_user.iloc[i]['song_id']
+#         pos_song_idx = self.songid2metaindex[pos_song_id]
+#
+#         # load torch positive tensor
+#         if self.data_type == 'scatter':
+#             X = torch.load(self.metadata['data'].loc[pos_song_idx])
+#             X = self._sample(X, 17)
+#         elif self.data_type == 'mel':
+#             X = torch.load(self.metadata['data_mel'].loc[pos_song_idx])
+#             data_mel = self.metadata['data_mel'].loc[pos_song_idx]
+#             X = X.t()
+#             X = self._sample(X, 44)
+#
+#         user_idx = self.dh.user_index[self.triplets_df_user.iloc[i]['user_id']]
+#         if user_idx == 137:
+#             print("Score Data User: {}".format(self.triplets_df_user.iloc[i]['user_id']))
+#         user_idx = torch.tensor(user_idx)
+#
+#         score = self.triplets_df_user.iloc[i]['score']
+#         y = torch.from_numpy(np.array(score)).float()
+#
+#         sample = {'pos': X, 'u': user_idx, 'y': y, 'pos_song_idx': pos_song_idx, 'data_mel': data_mel}
+#
+#         if self.transform:
+#             sample = self.transform(sample)
+#
+#         return sample
+
+
 class DCUEItemset(DCUEDataset):
 
     """Class for loading dataset required to train DCUE model."""
 
     def __init__(self, triplets_txt, metadata_csv, data_type='mel',
                  n_users=20000, n_items=10000, transform=None,
-                 excluded_ids=None):
+                 excluded_ids=None, random_seed=None):
         """
         Initialize DCUE dataset.
 
@@ -449,7 +574,7 @@ class DCUEItemset(DCUEDataset):
         DCUEDataset.__init__(
             self, triplets_txt, metadata_csv, data_type=data_type,
             n_users=n_users, n_items=n_items, transform=transform,
-            excluded_ids=excluded_ids)
+            excluded_ids=excluded_ids, random_seed=random_seed)
 
         # filter metadata to only top items
         self.metadata = self.metadata[
@@ -513,19 +638,27 @@ class SubtractMean(object):
     def __call__(self, sample):
         """Subtract the appropriate mean from the sample data."""
         if self.data_type == 'mel':
-            mean = 22
+            mean = 2.3779549598693848
         elif self.data_type == 'scatter':
-            mean = 21
+            mean = 0.21285544335842133
 
         if 'data' in sample:
             key = 'data'
-            inputs = sample['data']
-        elif 'pos' in sample:
-            key = 'pos'
-            inputs = sample['pos']
+            inputs = sample[key]
+            inputs -= mean
+            sample[key] = inputs
 
-        inputs -= mean
-        sample[key] = inputs
+        if 'pos' in sample:
+            key = 'pos'
+            inputs = sample[key]
+            inputs -= mean
+            sample[key] = inputs
+
+        if 'neg' in sample:
+            key = 'neg'
+            inputs = sample[key]
+            inputs -= mean
+            sample[key] = inputs
 
         return sample
 
