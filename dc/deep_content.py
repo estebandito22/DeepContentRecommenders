@@ -924,43 +924,6 @@ class DCUE(Trainer):
 
         return np.mean(auc)
 
-    # def predict(self, user, loader):
-    #     """
-    #     Predict for a user.
-    #
-    #     Args
-    #         user: a user id
-    #     """
-    #     loader.dataset.create_user_data(user)
-    #     self.model.eval()
-    #
-    #     if loader.dataset.user_has_songs:
-    #
-    #         with torch.no_grad():
-    #             scores = []
-    #             targets = []
-    #             pos_scores = []
-    #             neg_scores = []
-    #             for batch_samples in loader:
-    #
-    #                 u = batch_samples['u']
-    #                 pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
-    #                 y = batch_samples['y'].float()
-    #
-    #                 if self.USE_CUDA:
-    #                     u = u.cuda()
-    #                     pos = pos.cuda()
-    #
-    #                 if pos.size()[0] > 1:
-    #                     # forward pass
-    #                     score = self.model(u, pos).squeeze(1)
-    #                     scores += score.cpu().numpy().tolist()
-    #                     targets += y.numpy().tolist()
-    #
-    #         return scores, targets
-    #
-    #     return None, None
-
     def predict(self, user, loader):
         """
         Predict for a user.
