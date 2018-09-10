@@ -67,7 +67,7 @@ class DCBR(Trainer):
 
     def __init__(self, factors=400, l2=1, alpha=1, cf_eps=1e-8, n_iter=15,
                  n_splits=5, train_pct=0.7, n_recs=500, eval_pct=0.01,
-                 output_size=400, dropout=0, batch_size=32, lr=0.001,
+                 output_size=400, batch_size=32, lr=0.001,
                  beta_one=0.9, beta_two=0.999, nn_eps=1e-8, weight_decay=0,
                  num_epochs=100, bn_momentum=0.5, data_type='mel'):
         """
@@ -88,7 +88,6 @@ class DCBR(Trainer):
             eval_pct: The percent of users to use for evaluation.
 
             output_size: size of the target factor dim.
-            dropout: dropout to use.
             batch_size: batch_size to use.
             lr: learning rate to use.
             beta_one: beta one parameter in ADAM.
@@ -114,7 +113,6 @@ class DCBR(Trainer):
 
         # nn model attributes
         self.output_size = output_size
-        self.dropout = dropout
         self.batch_size = batch_size
         self.lr = lr
         self.beta_one = beta_one
@@ -237,7 +235,6 @@ class DCBR(Trainer):
         """Initialize the nn model for training."""
         self.nn_dict_args = {
             'output_size': self.output_size,
-            'dropout': self.dropout,
             'init_fc_bias': self.wrmf.wrmf.item_factors.mean(0),
             'bn_momentum': self.bn_momentum,
             'data_type': self.data_type}
@@ -345,7 +342,6 @@ class DCBR(Trainer):
         # Print settings to output file
         print("WRMF Name:{}\n\
                Output Size: {}\n\
-               Dropout Rate: {}\n\
                Batch Size: {}\n\
                Learning Rate: {}\n\
                Beta One: {}\n\
@@ -354,7 +350,7 @@ class DCBR(Trainer):
                Weight Decay: {}\n\
                Num Epochs: {}\n\
                Save Dir: {}".format(
-                   self.wrmf_name, self.output_size, self.dropout,
+                   self.wrmf_name, self.output_size,
                    self.batch_size, self.lr, self.beta_one, self.beta_two,
                    self.nn_eps, self.weight_decay, self.num_epochs,
                    save_dir))
@@ -539,8 +535,8 @@ class DCBR(Trainer):
 
         if self.nn_model is not None:
 
-            model_dir = "{}_CONV_drop_{}_lr_{}_b1_{}_b2_{}_wd_{}".format(
-                self.wrmf_name, self.dropout, self.lr, self.beta_one,
+            model_dir = "{}_CONV_lr_{}_b1_{}_b2_{}_wd_{}".format(
+                self.wrmf_name, self.lr, self.beta_one,
                 self.beta_two, self.weight_decay)
 
             if not os.path.isdir(os.path.join(models_dir, model_dir)):
@@ -580,7 +576,7 @@ class DCUE(Trainer):
                  u_embdim=300, margin=0.2, lr=0.00001, beta_one=0.9,
                  beta_two=0.99, eps=1e-8, weight_decay=0, num_epochs=100,
                  bn_momentum=0.5, model_type='mel', data_type='mel',
-                 n_users=20000, n_items=10000, eval_pct=0.025):
+                 n_users=20000, n_items=10000, eval_pct=1):
         """
         Initialize DCUE model.
 
