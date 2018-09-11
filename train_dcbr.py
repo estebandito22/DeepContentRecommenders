@@ -6,14 +6,14 @@ from dc.deep_content import DCBR
 
 
 def main(factors, l2, alpha, cf_eps, n_iter, n_splits, train_pct, n_recs,
-         eval_pct, output_size, dropout, batch_size, lr, beta_one, beta_two,
+         eval_pct, output_size, batch_size, lr, beta_one, beta_two,
          nn_eps, weight_decay, num_epochs, bn_momentum, data_type,
          triplets_txt, metadata_csv, save_dir, cf_only):
     """Train DCBR model."""
     dcbr = DCBR(factors, l2, alpha, cf_eps, n_iter, n_splits, train_pct,
-                n_recs, eval_pct, output_size, dropout,
-                batch_size, lr, beta_one, beta_two, nn_eps, weight_decay,
-                num_epochs, bn_momentum, data_type)
+                n_recs, eval_pct, output_size, batch_size, lr, beta_one,
+                beta_two, nn_eps, weight_decay, num_epochs, bn_momentum,
+                data_type)
 
     if cf_only:
         dcbr.fit_cf(triplets_txt)
@@ -35,7 +35,6 @@ if __name__ == '__main__':
     --n_recs 500 \
     --eval_pct 0.01 \
     --output_size 400 \
-    --dropout 0 \
     --batch_size 32 \
     --lr 0.00001 \
     --weight_decay 0.0005 \
@@ -69,8 +68,6 @@ if __name__ == '__main__':
     ap.add_argument("-o", "--output_size", type=int,
                     help="Dimension of the target in NN model.  Corresponds \
                           to factors in CF model.")
-    ap.add_argument("-d", "--dropout", type=float,
-                    help="Percentage to use for dropout in NN model.")
     ap.add_argument("-bs", "--batch_size", type=int,
                     help="Number of samples per batch in NN model.")
     ap.add_argument("-lr", "--lr", type=float,
@@ -110,7 +107,6 @@ if __name__ == '__main__':
          args['n_recs'],
          args['eval_pct'],
          args['output_size'],
-         args['dropout'],
          args['batch_size'],
          args['lr'],
          args['beta_one'],

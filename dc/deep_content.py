@@ -384,6 +384,11 @@ class DCBR(Trainer):
                 sp, train_loss = self._nn_train_epoch(train_loader)
                 samples_processed += sp
 
+                print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss: \
+                {}".format(epoch, self.num_epochs, samples_processed,
+                           len(self.nn_train_data)*self.num_epochs,
+                           train_loss))
+
             # Validation epoch
             if epoch % 5 == 0:
                 _, val_loss = self._nn_eval_epoch(val_loader)
@@ -393,12 +398,6 @@ class DCBR(Trainer):
                     epoch, self.num_epochs, samples_processed,
                     len(self.nn_train_data)*self.num_epochs, train_loss,
                     val_loss))
-            else:
-                print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss: \
-                {}\tValidation Loss: {}".format(
-                    epoch, self.num_epochs, samples_processed,
-                    len(self.nn_train_data)*self.num_epochs, train_loss,
-                    None))
 
             # Save model
             if val_loss < best_loss:
@@ -877,7 +876,12 @@ class DCUE(Trainer):
                 sp, train_loss = self._train_epoch(train_loader)
                 samples_processed += sp
 
-            if epoch % 1 == 0:
+                # report
+                print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss:{}".format(
+                    epoch, self.num_epochs, samples_processed,
+                    len(self.train_data)*self.num_epochs, train_loss))
+
+            if epoch % 5 == 0:
                 # compute loss
                 print("Initializing val epoch...")
                 _, val_loss = self._eval_epoch(val_loader)

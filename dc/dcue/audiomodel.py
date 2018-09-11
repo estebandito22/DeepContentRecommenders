@@ -265,7 +265,7 @@ class ConvNetMel2(nn.Module):
         self.layer5 = nn.Conv2d(
             in_channels=128, out_channels=256, kernel_size=(1, 1),
             stride=(1, 1), bias=False)
-        self.pool5 = nn.MaxPool2d(kernel_size=(1, 3))
+        self.pool5 = nn.MaxPool2d(kernel_size=(1, 2))
         self.batchnorm5 = nn.BatchNorm2d(
             256, momentum=self.bn_momentum, track_running_stats=False)
         self.relu5 = nn.ReLU()
