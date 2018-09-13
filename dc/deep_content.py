@@ -736,11 +736,10 @@ class DCUE(Trainer):
             # prepare training sample
             u = batch_samples['u']
             y = batch_samples['y']
-            # batch size x 1 x seqdim x seqlen
-            # TO DO: remove permute to maintaing contiguous tensors
-            pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
-            # batch size x neg batch size x 1 x seqdim x seqlen
-            neg = batch_samples['neg'].unsqueeze(2).permute(0, 1, 2, 4, 3)
+            # batch size x seqdim x seqlen
+            pos = batch_samples['pos']
+            # batch size x neg batch size x seqdim x seqlen
+            neg = batch_samples['neg']
 
             if self.USE_CUDA:
                 u = u.cuda()
@@ -780,10 +779,10 @@ class DCUE(Trainer):
                 # prepare training sample
                 u = batch_samples['u']
                 y = batch_samples['y']
-                # batch size x 1 x seqdim x seqlen
-                pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
-                # batch size x neg batch size x 1 x seqdim x seqlen
-                neg = batch_samples['neg'].unsqueeze(2).permute(0, 1, 2, 4, 3)
+                # batch size x seqdim x seqlen
+                pos = batch_samples['pos']
+                # batch size x neg batch size x seqdim x seqlen
+                neg = batch_samples['neg']
 
                 if self.USE_CUDA:
                     u = u.cuda()
@@ -1040,7 +1039,8 @@ class DCUE(Trainer):
         self.model.eval()
         with torch.no_grad():
             for batch_samples in item_loader:
-                pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
+                # batch size x seqdim x seqlen
+                pos = batch_samples['pos']
                 metadata_indexes = batch_samples['metadata_index']
 
                 if self.USE_CUDA:

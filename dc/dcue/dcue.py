@@ -12,7 +12,6 @@ import torch.nn as nn
 
 from dc.dcue.audiomodel import ConvNetScatter
 from dc.dcue.audiomodel import ConvNetMel
-from dc.dcue.audiomodel import ConvNetMel2
 
 from dc.dcue.userembedding import UserEmbeddings
 
@@ -51,8 +50,6 @@ class DCUENet(nn.Module):
             self.conv = ConvNetScatter(dict_args)
         elif self.model_type == 'mel':
             self.conv = ConvNetMel(dict_args)
-        elif self.model_type == 'mel2':
-            self.conv = ConvNetMel2(dict_args)
 
         # user embedding arguments
         dict_args = {'user_embdim': self.user_embdim,
@@ -79,9 +76,9 @@ class DCUENet(nn.Module):
 
         if neg is not None:
             # negative scores
-            batch_size, neg_batch_size, channels, seqdim, seqlen = neg.size()
+            batch_size, neg_batch_size, seqdim, seqlen = neg.size()
             neg = neg.view(
-                [batch_size * neg_batch_size, channels, seqdim, seqlen])
+                [batch_size * neg_batch_size, seqdim, seqlen])
             neg_featvects = self.conv(neg)
             neg_featvects = neg_featvects.view(
                 [batch_size, neg_batch_size, self.feature_dim])
@@ -100,22 +97,22 @@ if __name__ == '__main__':
     truth = torch.ones([2, 1])*-1
 
     dict_argstest = {'output_size': 100, 'bn_momentum': 0.5}
-    conv = ConvNetScatter(dict_argstest)
+    conv = ConvNetMel(dict_argstest)
     sim = nn.CosineSimilarity(dim=1)
 
     utest = torch.ones([2, 100])*7
     utest[0] *= 2
 
-    postest = torch.ones([2, 1, 441, 17])
+    postest = torch.ones([2, 128, 44])
     postest[0] *= 3
     postest[1] *= 4
 
     pos_featvectstest = conv(postest)
     pos_scorestest = sim(utest, pos_featvectstest)
 
-    negtest = torch.rand([2, 3, 1, 441, 17])
+    negtest = torch.ones([2, 3, 128, 44])
     negtest[0] *= 3
-    negtest = negtest.view([6, 1, 441, 17])
+    negtest = negtest.view([6, 128, 44])
 
     neg_featvectstest = conv(negtest)
     neg_featvectstest = neg_featvectstest.view([2, 3, 100])

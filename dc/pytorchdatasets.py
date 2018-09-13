@@ -290,11 +290,16 @@ class DCUEDataset(Dataset):
             nonitems = np.random.choice(nonitems, self.neg_samples)
         return [self.itemindex2songid[idx] for idx in nonitems]
 
-    def _sample(self, X, length):
+    def _sample(self, X, length, dim=1):
         if self.random_seed is not None:
             np.random.seed(self.random_seed)
-        rand_start = np.random.randint(0, X.size()[0] - length)
-        X = X[rand_start:rand_start + length]
+        rand_start = np.random.randint(0, X.size()[dim] - length)
+        if dim == 0:
+            X = X[rand_start:rand_start + length]
+        elif dim == 1:
+            X = X[:, rand_start:rand_start + length]
+        else:
+            raise ValueError("dim must be 0 or 1.")
         return X
 
     def __len__(self):
@@ -316,22 +321,20 @@ class DCUEDataset(Dataset):
         # load torch positive tensor
         if self.data_type == 'scatter':
             X = torch.load(self.metadata['data'].loc[pos_song_idx])
-            X = self._sample(X, 17)
+            X = self._sample(X, 17, 0)
         elif self.data_type == 'mel':
             X = torch.load(self.metadata['data_mel'].loc[pos_song_idx])
-            X = X.t()
-            X = self._sample(X, 44)
+            X = self._sample(X, 44, 1)
 
         # load torch negative tensor
         Ns = []
         for idx in neg_song_idxs:
             if self.data_type == 'scatter':
                 N = torch.load(self.metadata['data'].loc[idx])
-                N = self._sample(N, 17)
+                N = self._sample(N, 17, 0)
             elif self.data_type == 'mel':
                 N = torch.load(self.metadata['data_mel'].loc[idx])
-                N = N.t()
-                N = self._sample(N, 44)
+                N = self._sample(N, 44, 1)
             Ns += [N]
         Ns = torch.stack(Ns)
 
@@ -484,11 +487,10 @@ class DCUEItemset(DCUEDataset):
         # load torch positive tensor
         if self.data_type == 'scatter':
             X = torch.load(self.metadata['data'].loc[pos_song_idx])
-            X = self._sample(X, 17)
+            X = self._sample(X, 17, 0)
         elif self.data_type == 'mel':
             X = torch.load(self.metadata['data_mel'].loc[pos_song_idx])
-            X = X.t()
-            X = self._sample(X, 44)
+            X = self._sample(X, 44, 1)
 
         sample = {'pos': X, 'metadata_index': pos_song_idx}
 

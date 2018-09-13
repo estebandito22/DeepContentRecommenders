@@ -7,12 +7,12 @@ from dc.deep_content import DCUE
 
 def main(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
          beta_one, beta_two, eps, weight_decay, num_epochs, bn_momentum,
-         model_type, data_type, n_users, n_items, triplets_txt, metadata_csv,
-         save_dir):
+         model_type, data_type, n_users, n_items, eval_pct, triplets_txt,
+         metadata_csv, save_dir):
     """Train DCUE model."""
     dcue = DCUE(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
                 beta_one, beta_two, eps, weight_decay, num_epochs, bn_momentum,
-                model_type, data_type, n_users, n_items)
+                model_type, data_type, n_users, n_items, eval_pct)
 
     dcue.fit(triplets_txt, metadata_csv, save_dir)
 
@@ -75,6 +75,8 @@ if __name__ == '__main__':
                     help="Number of users to include.")
     ap.add_argument("-ni", "--n_items", type=int, default=10000,
                     help="Number of items to include.")
+    ap.add_argument("-p", "--eval_pct", type=float, default=0.025,
+                    help="Number of items to include.")
     ap.add_argument("-tx", "--triplets_txt",
                     help="Path to triplets.txt file for training.")
     ap.add_argument("-mc", "--metadata_csv",
@@ -100,6 +102,7 @@ if __name__ == '__main__':
          args['data_type'],
          args['n_users'],
          args['n_items'],
+         args['eval_pct'],
          args['triplets_txt'],
          args['metadata_csv'],
          args['save_dir'])

@@ -48,6 +48,7 @@ build
 dist
 DeepContentRecommenders.egg-info
 dc/deprecated
+dc/dcue/deprecated
 
 # Data Files #
 ##############
