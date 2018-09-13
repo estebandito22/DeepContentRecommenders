@@ -3,8 +3,6 @@
 from abc import ABC, abstractmethod
 
 import os
-import datetime
-from collections import defaultdict
 
 import numpy as np
 
@@ -575,7 +573,7 @@ class DCUE(Trainer):
                  u_embdim=300, margin=0.2, lr=0.00001, beta_one=0.9,
                  beta_two=0.99, eps=1e-8, weight_decay=0, num_epochs=100,
                  bn_momentum=0.5, model_type='mel', data_type='mel',
-                 n_users=20000, n_items=10000, eval_pct=1):
+                 n_users=20000, n_items=10000, eval_pct=0.025):
         """
         Initialize DCUE model.
 
@@ -739,6 +737,7 @@ class DCUE(Trainer):
             u = batch_samples['u']
             y = batch_samples['y']
             # batch size x 1 x seqdim x seqlen
+            # TO DO: remove permute to maintaing contiguous tensors
             pos = batch_samples['pos'].unsqueeze(1).permute(0, 1, 3, 2)
             # batch size x neg batch size x 1 x seqdim x seqlen
             neg = batch_samples['neg'].unsqueeze(2).permute(0, 1, 2, 4, 3)
