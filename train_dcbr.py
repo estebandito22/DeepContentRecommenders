@@ -2,7 +2,7 @@
 
 from argparse import ArgumentParser
 
-from dc.deep_content import DCBR
+from dc.nn.dcbr import DCBR
 
 
 def main(factors, l2, alpha, cf_eps, n_iter, n_splits, train_pct, n_recs,

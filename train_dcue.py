@@ -2,7 +2,7 @@
 
 from argparse import ArgumentParser
 
-from dc.deep_content import DCUE
+from dc.nn.dcue import DCUE
 
 
 def main(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
