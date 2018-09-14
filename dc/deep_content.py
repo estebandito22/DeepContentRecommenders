@@ -737,9 +737,9 @@ class DCUE(Trainer):
             u = batch_samples['u']
             y = batch_samples['y']
             # batch size x seqdim x seqlen
-            pos = batch_samples['pos']
+            pos = batch_samples['X']
             # batch size x neg batch size x seqdim x seqlen
-            neg = batch_samples['neg']
+            neg = self._withinbatch_negsample(pos)
 
             if self.USE_CUDA:
                 u = u.cuda()
@@ -752,7 +752,7 @@ class DCUE(Trainer):
             preds = self.model(u, pos, neg)
 
             # backward pass
-            loss = self.loss_func(preds, y.expand(-1, self.neg_batch_size))
+            loss = self.loss_func(preds, y)
             loss.backward()
             self.optimizer.step()
 
@@ -780,9 +780,9 @@ class DCUE(Trainer):
                 u = batch_samples['u']
                 y = batch_samples['y']
                 # batch size x seqdim x seqlen
-                pos = batch_samples['pos']
+                pos = batch_samples['X']
                 # batch size x neg batch size x seqdim x seqlen
-                neg = batch_samples['neg']
+                neg = self._withinbatch_negsample(pos)
 
                 if self.USE_CUDA:
                     u = u.cuda()
@@ -794,7 +794,7 @@ class DCUE(Trainer):
                 preds = self.model(u, pos, neg)
 
                 # compute loss
-                loss = self.loss_func(preds, y.expand(-1, self.neg_batch_size))
+                loss = self.loss_func(preds, y)
 
                 samples_processed += pos.size()[0]
                 losses_processed += preds.numel()
@@ -854,9 +854,10 @@ class DCUE(Trainer):
             self.train_data, batch_size=self.batch_size, shuffle=True,
             num_workers=4)
         val_loader = DataLoader(
-            self.val_data, batch_size=self.batch_size, num_workers=4)
+            self.val_data, batch_size=self.batch_size, shuffle=True,
+            num_workers=4)
         pred_loader = DataLoader(
-            self.pred_data, batch_size=1024, num_workers=4)
+            self.pred_data, batch_size=1024, shuffle=True, num_workers=4)
 
         self._init_nn()
 
@@ -951,7 +952,7 @@ class DCUE(Trainer):
                     u = torch.stack(u)
 
                     i = []
-                    for idx in batch_samples['pos_song_idx']:
+                    for idx in batch_samples['song_idx']:
                         i += [self.item_factors[idx]]
                     i = torch.stack(i)
 
@@ -1040,16 +1041,29 @@ class DCUE(Trainer):
         with torch.no_grad():
             for batch_samples in item_loader:
                 # batch size x seqdim x seqlen
-                pos = batch_samples['pos']
+                X = batch_samples['X']
                 metadata_indexes = batch_samples['metadata_index']
 
                 if self.USE_CUDA:
-                    pos = pos.cuda()
+                    X = X.cuda()
 
-                item_factor = self.model.conv(pos)
+                item_factor = self.model.conv(X)
 
                 for i, idx in enumerate(metadata_indexes):
                     self.item_factors[idx] = item_factor[i]
+
+    def _withinbatch_negsample(self, song_batch):
+        batch_size, seqdim, seqlen = song_batch.size()
+        neg = torch.zeros([batch_size, self.neg_batch_size, seqdim, seqlen])
+
+        for i in range(batch_size):
+            indexes = [x for x in range(0, i)] + \
+                      [x for x in range(i+1, batch_size)]
+            for j in range(self.neg_batch_size):
+                rand_idx = np.random.choice(indexes)
+                neg[i][j].copy_(song_batch[rand_idx])
+
+        return neg
 
     def save(self, models_dir=None):
         """

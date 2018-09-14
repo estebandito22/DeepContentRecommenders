@@ -273,23 +273,6 @@ class DCUEDataset(Dataset):
         self.uniq_song_idxs = [self.dh.item_index[song_id] for
                                song_id in self.uniq_songs]
 
-    def _user_nonitem_songids(self, user_id):
-        """
-        Sample negative items for user.
-
-        Args
-            user_id: a user id from the triplets_txt file.
-        """
-        i = self.dh.user_index[user_id]
-        items = self.dh.item_user.getcol(i).nonzero()[0]
-        nonitems = self.all_items[
-            (~np.in1d(self.all_items, items)) &
-            (np.in1d(self.all_items, self.uniq_song_idxs))]
-        np.random.seed()
-        if self.neg_samples is not None:
-            nonitems = np.random.choice(nonitems, self.neg_samples)
-        return [self.itemindex2songid[idx] for idx in nonitems]
-
     def _sample(self, X, length, dim=1):
         if self.random_seed is not None:
             np.random.seed(self.random_seed)
@@ -309,42 +292,26 @@ class DCUEDataset(Dataset):
     def __getitem__(self, i):
         """Return a sample from the dataset."""
         # positive sample
-        user_id = self.dh.triplets_df.iloc[i]['user_id']
-        pos_song_id = self.dh.triplets_df.iloc[i]['song_id']
-        pos_song_idx = self.songid2metaindex[pos_song_id]
-
-        # negative samples
-        neg_song_ids = self._user_nonitem_songids(user_id)
-        neg_song_idxs = [self.songid2metaindex[song_id]
-                         for song_id in neg_song_ids]
+        song_id = self.dh.triplets_df.iloc[i]['song_id']
+        song_idx = self.songid2metaindex[song_id]
 
         # load torch positive tensor
         if self.data_type == 'scatter':
-            X = torch.load(self.metadata['data'].loc[pos_song_idx])
+            X = torch.load(self.metadata['data'].loc[song_idx])
             X = self._sample(X, 17, 0)
         elif self.data_type == 'mel':
-            X = torch.load(self.metadata['data_mel'].loc[pos_song_idx])
+            X = torch.load(self.metadata['data_mel'].loc[song_idx])
             X = self._sample(X, 44, 1)
-
-        # load torch negative tensor
-        Ns = []
-        for idx in neg_song_idxs:
-            if self.data_type == 'scatter':
-                N = torch.load(self.metadata['data'].loc[idx])
-                N = self._sample(N, 17, 0)
-            elif self.data_type == 'mel':
-                N = torch.load(self.metadata['data_mel'].loc[idx])
-                N = self._sample(N, 44, 1)
-            Ns += [N]
-        Ns = torch.stack(Ns)
 
         # returned for user embedding
         user_idx = self.dh.user_index[self.dh.triplets_df.iloc[i]['user_id']]
         user_idx = torch.tensor(user_idx)
 
-        y = torch.tensor([-1.0]).float()
+        # all targets are -1
+        y = torch.tensor((), dtype=torch.float32).new_full(
+            [self.neg_samples], -1)
 
-        sample = {'u': user_idx, 'y': y, 'pos': X, 'neg': Ns}
+        sample = {'u': user_idx, 'X': X, 'y': y}
 
         if self.transform:
             sample = self.transform(sample)
@@ -379,7 +346,7 @@ class DCUEPredset(DCUEDataset):
             excluded_ids=excluded_ids, random_seed=random_seed)
 
         # user data sets
-        self.triplets_df_user = self.dh.triplets_df
+        self.triplets_df_user = None
         self.user_has_songs = False
 
     def _user_nonitem_songids(self, user_id):
@@ -428,8 +395,8 @@ class DCUEPredset(DCUEDataset):
 
     def __getitem__(self, i):
         """Return sample from the user dataset."""
-        pos_song_id = self.triplets_df_user.iloc[i]['song_id']
-        pos_song_idx = self.songid2metaindex[pos_song_id]
+        song_id = self.triplets_df_user.iloc[i]['song_id']
+        song_idx = self.songid2metaindex[song_id]
 
         user_idx = self.dh.user_index[self.triplets_df_user.iloc[i]['user_id']]
         user_idx = torch.tensor(user_idx)
@@ -437,7 +404,7 @@ class DCUEPredset(DCUEDataset):
         score = self.triplets_df_user.iloc[i]['score']
         y = torch.from_numpy(np.array(score)).float()
 
-        sample = {'u': user_idx, 'y': y, 'pos_song_idx': pos_song_idx}
+        sample = {'u': user_idx, 'y': y, 'song_idx': song_idx}
 
         if self.transform:
             sample = self.transform(sample)
@@ -481,18 +448,18 @@ class DCUEItemset(DCUEDataset):
     def __getitem__(self, i):
         """Return a sample from the dataset."""
         # positive sample
-        pos_song_id = self.metadata.iloc[i]['song_id']
-        pos_song_idx = self.songid2metaindex[pos_song_id]
+        song_id = self.metadata.iloc[i]['song_id']
+        song_idx = self.songid2metaindex[song_id]
 
         # load torch positive tensor
         if self.data_type == 'scatter':
-            X = torch.load(self.metadata['data'].loc[pos_song_idx])
+            X = torch.load(self.metadata['data'].loc[song_idx])
             X = self._sample(X, 17, 0)
         elif self.data_type == 'mel':
-            X = torch.load(self.metadata['data_mel'].loc[pos_song_idx])
+            X = torch.load(self.metadata['data_mel'].loc[song_idx])
             X = self._sample(X, 44, 1)
 
-        sample = {'pos': X, 'metadata_index': pos_song_idx}
+        sample = {'X': X, 'metadata_index': song_idx}
 
         if self.transform:
             sample = self.transform(sample)
@@ -541,50 +508,10 @@ class SubtractMean(object):
             inputs -= mean
             sample[key] = inputs
 
-        if 'pos' in sample:
-            key = 'pos'
+        if 'X' in sample:
+            key = 'X'
             inputs = sample[key]
             inputs -= mean
             sample[key] = inputs
 
-        if 'neg' in sample:
-            key = 'neg'
-            inputs = sample[key]
-            inputs -= mean
-            sample[key] = inputs
-
-        return sample
-
-
-class RandomSample(object):
-
-    """Take a random sample of a tensor along the first dimension."""
-
-    def __init__(self, length, dim, key):
-        """Initialize RandomSample."""
-        self.length = length
-        self.dim = dim
-        self.key = key
-
-    def __call__(self, sample):
-        """
-        Randomly sample data along the first dimension of length len.
-
-        Args
-            sample: a dictionary with a key 'data' containing a tensor.
-            len: the length of the sample to take from the data tensor.
-            dim: dimension to sample on.  0 or 1.
-
-        Return
-            the original sample with newly randomly sampled tensor.
-        """
-        X = sample[self.key]
-        rand_start = np.random.randint(0, X.size()[self.dim] - self.length)
-
-        if self.dim == 0:
-            X = X[rand_start:rand_start + self.length]
-        elif self.dim == 1:
-            X = X[:, rand_start:rand_start + self.length]
-
-        sample[self.key] = X
         return sample
