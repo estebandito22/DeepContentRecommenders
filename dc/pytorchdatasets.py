@@ -211,16 +211,36 @@ class DCUEDataset(Dataset):
         self.excluded_ids = excluded_ids
         self.random_seed = random_seed
 
-        # load metadata and exclude ids
-        self.metadata = pd.read_csv(metadata_csv)
-        if self.excluded_ids is not None:
-            self.metadata = self.metadata[
-                ~self.metadata['song_id'].isin(excluded_ids)]
-            self.metadata = self.metadata.reset_index(drop=True)
-
+        # load audio metadata dataset
+        self._load_metadata()
         # load taste profile dataset
         self.dh = CFDataHandler(triplets_txt)
+        # align the two datasets
+        self._align_datasets(n_items, n_users)
+        # build indexes to convert between datasets
+        self._build_indexes()
 
+        # build all items to sample from
+        self.n_items = self.dh.item_user.shape[0]
+        self.n_users = self.dh.item_user.shape[1]
+        self.all_items = np.arange(0, self.n_items)
+
+        # limit data to specific split
+        self._train_test_split()
+
+        # dataset stats
+        self.uniq_songs = self.dh.triplets_df['song_id'].unique()
+        self.uniq_song_idxs = [self.dh.item_index[song_id] for
+                               song_id in self.uniq_songs]
+
+    def _build_indexes(self):
+        # lookup tables
+        self.songid2metaindex = {v: k for (k, v)
+                                 in self.metadata['song_id'].to_dict().items()}
+        self.itemindex2songid = {v: k for (k, v)
+                                 in self.dh.item_index.items()}
+
+    def _align_datasets(self, n_items, n_users):
         # limit taste df to songs with audio only
         self.dh.triplets_df = self.dh.triplets_df[
             self.dh.triplets_df['song_id'].isin(self.metadata['song_id'])]
@@ -238,17 +258,15 @@ class DCUEDataset(Dataset):
         # build item_user sparse matrix for quick item lookups
         self.dh.item_user_matrix()
 
-        # lookup tables
-        self.songid2metaindex = {v: k for (k, v)
-                                 in self.metadata['song_id'].to_dict().items()}
-        self.itemindex2songid = {v: k for (k, v)
-                                 in self.dh.item_index.items()}
+    def _load_metadata(self):
+        # load metadata and exclude ids
+        self.metadata = pd.read_csv(self.metadata_csv)
+        if self.excluded_ids is not None:
+            self.metadata = self.metadata[
+                ~self.metadata['song_id'].isin(self.excluded_ids)]
+            self.metadata = self.metadata.reset_index(drop=True)
 
-        # build all items to sample from
-        self.n_items = self.dh.item_user.shape[0]
-        self.n_users = self.dh.item_user.shape[1]
-        self.all_items = np.arange(0, self.n_items)
-
+    def _train_test_split(self):
         # create train and val and test splits
         uniq_songs = self.dh.triplets_df['song_id'].unique()
         np.random.seed(10)
@@ -268,10 +286,6 @@ class DCUEDataset(Dataset):
         elif self.split == 'test':
             self.dh.triplets_df = self.dh.triplets_df[
                 ~self.dh.triplets_df['song_id'].isin(train_songs)]
-
-        self.uniq_songs = self.dh.triplets_df['song_id'].unique()
-        self.uniq_song_idxs = [self.dh.item_index[song_id] for
-                               song_id in self.uniq_songs]
 
     def _sample(self, X, length, dim=1):
         if self.random_seed is not None:
