@@ -11,7 +11,8 @@ import torch
 import torch.nn as nn
 
 from dc.dcue.audiomodel import ConvNetScatter
-from dc.dcue.audiomodel import ConvNetMel
+from dc.dcue.audiomodel import ConvNetMel1D
+from dc.dcue.audiomodel import ConvNetMel2D
 
 from dc.dcue.userembedding import UserEmbeddings
 
@@ -48,8 +49,10 @@ class DCUENet(nn.Module):
 
         if self.model_type == 'scatter':
             self.conv = ConvNetScatter(dict_args)
-        elif self.model_type == 'mel':
-            self.conv = ConvNetMel(dict_args)
+        elif self.model_type == 'mel1d':
+            self.conv = ConvNetMel1D(dict_args)
+        elif self.model_type == 'mel2d':
+            self.conv = ConvNetMel2D(dict_args)
 
         # user embedding arguments
         dict_args = {'user_embdim': self.user_embdim,
@@ -76,9 +79,14 @@ class DCUENet(nn.Module):
 
         if neg is not None:
             # negative scores
-            batch_size, neg_batch_size, seqdim, seqlen = neg.size()
-            neg = neg.view(
-                [batch_size * neg_batch_size, seqdim, seqlen])
+            if self.model_type.find('1d') > -1:
+                batch_size, neg_batch_size, seqdim, seqlen = neg.size()
+                neg = neg.view(
+                    [batch_size * neg_batch_size, seqdim, seqlen])
+            elif self.model_type.find('2d') > -1:
+                batch_size, neg_batch_size, chan, seqdim, seqlen = neg.size()
+                neg = neg.view(
+                    [batch_size * neg_batch_size, chan, seqdim, seqlen])
             neg_featvects = self.conv(neg)
             neg_featvects = neg_featvects.view(
                 [batch_size, neg_batch_size, self.feature_dim])

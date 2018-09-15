@@ -1,7 +1,7 @@
 """Classes to train Deep Content Recommender Models."""
 
 import os
-
+import datetime
 import numpy as np
 
 import torch
@@ -197,6 +197,12 @@ class DCUE(Trainer):
             # batch size x neg batch size x seqdim x seqlen
             neg = self._withinbatch_negsample(pos)
 
+            if self.model_type.find('2d') > -1:
+                # batch size x 1 x seqdim x seqlen
+                pos = pos.unsqueeze(1)
+                # batch size x neg batch size x 1 x seqdim x seqlen
+                neg = neg.unsqueeze(2)
+
             if self.USE_CUDA:
                 u = u.cuda()
                 y = y.cuda()
@@ -239,6 +245,12 @@ class DCUE(Trainer):
                 pos = batch_samples['X']
                 # batch size x neg batch size x seqdim x seqlen
                 neg = self._withinbatch_negsample(pos)
+
+                if self.model_type.find('2d') > -1:
+                    # batch size x 1 x seqdim x seqlen
+                    pos = pos.unsqueeze(1)
+                    # batch size x neg batch size x 1 x seqdim x seqlen
+                    neg = neg.unsqueeze(2)
 
                 if self.USE_CUDA:
                     u = u.cuda()
@@ -328,8 +340,11 @@ class DCUE(Trainer):
             self.nn_epoch = epoch
             if epoch > 0:
                 print("Initializing train epoch...")
+                start = datetime.datetime.now()
                 sp, train_loss = self._train_epoch(train_loader)
                 samples_processed += sp
+                end = datetime.datetime.now()
+                print("Train epoch processed in {}".format(end-start))
 
                 # report
                 print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss:{}".format(
@@ -339,12 +354,19 @@ class DCUE(Trainer):
             if epoch % 5 == 0:
                 # compute loss
                 print("Initializing val epoch...")
+                start = datetime.datetime.now()
                 _, val_loss = self._eval_epoch(val_loader)
+                end = datetime.datetime.now()
+                print("Val epoch processed in {}".format(end-start))
 
                 # compute auc estimate.  Gives +/- approx 0.017 @ 95%
                 # confidence w/ 20K users.
+                print("Initializing AUC computation...")
+                start = datetime.datetime.now()
                 val_auc = self._compute_auc(
                     'val', pred_loader, pct=self.eval_pct)
+                end = datetime.datetime.now()
+                print("AUC computation processed in {}".format(end-start))
 
                 # report
                 print("Epoch: [{}/{}]\tSamples: [{}/{}]\tTrain Loss: \
@@ -454,7 +476,6 @@ class DCUE(Trainer):
             self.best_val_loss = val_loss
 
     def _compute_auc(self, split, loader, pct=0.025):
-        print("Initializing AUC computation...")
         self._user_factors()
         self._item_factors()
 
@@ -498,6 +519,9 @@ class DCUE(Trainer):
             for batch_samples in item_loader:
                 # batch size x seqdim x seqlen
                 X = batch_samples['X']
+                if self.model_type.find('2d'):
+                    # batch size x 1 x seqdim x seqlen
+                    X = X.unsqueeze(1)
                 metadata_indexes = batch_samples['metadata_index']
 
                 if self.USE_CUDA:
