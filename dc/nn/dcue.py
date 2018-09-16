@@ -519,7 +519,7 @@ class DCUE(Trainer):
             for batch_samples in item_loader:
                 # batch size x seqdim x seqlen
                 X = batch_samples['X']
-                if self.model_type.find('2d'):
+                if self.model_type.find('2d') > -1:
                     # batch size x 1 x seqdim x seqlen
                     X = X.unsqueeze(1)
                 metadata_indexes = batch_samples['metadata_index']
