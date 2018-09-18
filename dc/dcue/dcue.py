@@ -41,11 +41,13 @@ class DCUENet(nn.Module):
         self.user_embdim = dict_args["user_embdim"]
         self.user_count = dict_args["user_count"]
         self.bn_momentum = dict_args["bn_momentum"]
+        self.dropout = dict_args["dropout"]
         self.model_type = dict_args["model_type"]
 
         # convnet arguments
         dict_args = {'output_size': self.feature_dim,
-                     'bn_momentum': self.bn_momentum}
+                     'bn_momentum': self.bn_momentum,
+                     'dropout': self.dropout}
 
         if self.model_type == 'scatter':
             self.conv = ConvNetScatter(dict_args)

@@ -28,7 +28,7 @@ class DCUE(Trainer):
     def __init__(self, feature_dim=100, batch_size=64, neg_batch_size=20,
                  u_embdim=300, margin=0.2, lr=0.00001, beta_one=0.9,
                  beta_two=0.99, eps=1e-8, weight_decay=0, num_epochs=100,
-                 bn_momentum=0.5, model_type='mel', data_type='mel',
+                 bn_momentum=0.5, dropout=0, model_type='mel', data_type='mel',
                  n_users=20000, n_items=10000, eval_pct=0.025):
         """
         Initialize DCUE model.
@@ -66,6 +66,7 @@ class DCUE(Trainer):
         self.weight_decay = weight_decay
         self.num_epochs = num_epochs
         self.bn_momentum = bn_momentum
+        self.dropout = dropout
         self.model_type = model_type
         self.data_type = data_type
         self.n_users = n_users
@@ -166,6 +167,7 @@ class DCUE(Trainer):
                           'user_embdim': self.u_embdim,
                           'user_count': self.train_data.n_users,
                           'bn_momentum': self.bn_momentum,
+                          'dropout': self.dropout,
                           'model_type': self.model_type}
 
         self.model = DCUENet(self.dict_args)
@@ -288,6 +290,7 @@ class DCUE(Trainer):
                Negative Batch Size: {}\n\
                User Embedding Dim: {}\n\
                Margin: {}\n\
+               Dropout: {}\n\
                Learning Rate: {}\n\
                Beta One: {}\n\
                Beta Two: {}\n\
@@ -300,10 +303,10 @@ class DCUE(Trainer):
                Num Items: {}\n\
                Save Dir: {}".format(
                    self.feature_dim, self.batch_size, self.neg_batch_size,
-                   self.u_embdim, self.margin, self.lr, self.beta_one,
-                   self.beta_two, self.eps, self.weight_decay, self.num_epochs,
-                   self.model_type, self.data_type, self.n_users, self.n_items,
-                   save_dir))
+                   self.u_embdim, self.margin, self.dropout, self.lr,
+                   self.beta_one, self.beta_two, self.eps, self.weight_decay,
+                   self.num_epochs, self.model_type, self.data_type,
+                   self.n_users, self.n_items, save_dir))
 
         self.model_dir = save_dir
         self.metadata_csv = metadata_csv
@@ -554,8 +557,8 @@ class DCUE(Trainer):
         """
         if (self.model is not None) and (models_dir is not None):
 
-            model_dir = "DCUE_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}_mt_{}".\
-                format(self.lr, self.beta_one, self.beta_two,
+            model_dir = "DCUE_do_{}_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}_mt_{}".\
+                format(self.dropout, self.lr, self.beta_one, self.beta_two,
                        self.weight_decay, self.n_users, self.n_items,
                        self.model_type)
 

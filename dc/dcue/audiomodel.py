@@ -122,49 +122,66 @@ class ConvNetMel1D(nn.Module):
         super(ConvNetMel1D, self).__init__()
         self.output_size = dict_args["output_size"]
         self.bn_momentum = dict_args["bn_momentum"]
+        self.dropout = dict_args["dropout"]
+        self.bias = True if self.dropout > 0 else False
         # input_size = batch size x 128 x 44
         self.layer1 = nn.Conv1d(
             in_channels=128, out_channels=32, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool1 = nn.MaxPool1d(kernel_size=2)
-        self.batchnorm1 = nn.BatchNorm1d(
-            32, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn1 = nn.Dropout(self.dropout)
+        else:
+            self.drop_bn1 = nn.BatchNorm1d(
+                32, momentum=self.bn_momentum)
         self.relu1 = nn.ReLU()
         # batch size x 32 x 22
 
         self.layer2 = nn.Conv1d(
             in_channels=32, out_channels=64, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool2 = nn.MaxPool1d(kernel_size=2)
-        self.batchnorm2 = nn.BatchNorm1d(
-            64, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn2 = nn.Dropout(self.dropout)
+        else:
+            self.drop_bn2 = nn.BatchNorm1d(
+                64, momentum=self.bn_momentum)
         self.relu2 = nn.ReLU()
         # batch size x 64 x 11
 
         self.layer3 = nn.Conv1d(
             in_channels=64, out_channels=128, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool3 = nn.MaxPool1d(kernel_size=2)
-        self.batchnorm3 = nn.BatchNorm1d(
-            128, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn3 = nn.Dropout(self.dropout)
+        else:
+            self.drop_bn3 = nn.BatchNorm1d(
+                128, momentum=self.bn_momentum)
         self.relu3 = nn.ReLU()
         # batch size x 128 x 5
 
         self.layer4 = nn.Conv1d(
             in_channels=128, out_channels=128, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool4 = nn.MaxPool1d(kernel_size=2)
-        self.batchnorm4 = nn.BatchNorm1d(
-            128, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn4 = nn.Dropout(self.dropout)
+        else:
+            self.drop_bn4 = nn.BatchNorm1d(
+                128, momentum=self.bn_momentum)
         self.relu4 = nn.ReLU()
         # batch size x 128 x 2
 
         self.layer5 = nn.Conv1d(
             in_channels=128, out_channels=256, kernel_size=1,
-            stride=1, bias=False)
+            stride=1, bias=self.bias)
         self.pool5 = nn.MaxPool1d(kernel_size=2)
-        self.batchnorm5 = nn.BatchNorm1d(
-            256, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn5 = nn.Dropout(self.dropout)
+        else:
+            self.drop_bn5 = nn.BatchNorm1d(
+                256, momentum=self.bn_momentum)
         self.relu5 = nn.ReLU()
         # batch size x 256 x 1
 
@@ -182,23 +199,23 @@ class ConvNetMel1D(nn.Module):
         """Execute forward pass."""
         x = self.layer1(x)
         x = self.pool1(x)
-        x = self.batchnorm1(x)
+        x = self.drop_bn1(x)
         x = self.relu1(x)
         x = self.layer2(x)
         x = self.pool2(x)
-        x = self.batchnorm2(x)
+        x = self.drop_bn2(x)
         x = self.relu2(x)
         x = self.layer3(x)
         x = self.pool3(x)
-        x = self.batchnorm3(x)
+        x = self.drop_bn3(x)
         x = self.relu3(x)
         x = self.layer4(x)
         x = self.pool4(x)
-        x = self.batchnorm4(x)
+        x = self.drop_bn4(x)
         x = self.relu4(x)
         x = self.layer5(x)
         x = self.pool5(x)
-        x = self.batchnorm5(x)
+        x = self.drop_bn5(x)
         x = self.relu5(x)
 
         return self.fc(x.view(-1, 256))
@@ -221,49 +238,66 @@ class ConvNetMel2D(nn.Module):
         super(ConvNetMel2D, self).__init__()
         self.output_size = dict_args["output_size"]
         self.bn_momentum = dict_args["bn_momentum"]
+        self.dropout = dict_args["dropout"]
+        self.bias = True if self.dropout > 0 else False
         # input_size = batch size x 1 x 128 x 44
         self.layer1 = nn.Conv2d(
             in_channels=1, out_channels=32, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool1 = nn.MaxPool2d(kernel_size=2)
-        self.batchnorm1 = nn.BatchNorm2d(
-            32, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn1 = nn.Dropout2d(self.dropout)
+        else:
+            self.drop_bn1 = nn.BatchNorm2d(
+                32, momentum=self.bn_momentum)
         self.relu1 = nn.ReLU()
         # batch size x 32 x 64 x 22
 
         self.layer2 = nn.Conv2d(
             in_channels=32, out_channels=64, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool2 = nn.MaxPool2d(kernel_size=2)
-        self.batchnorm2 = nn.BatchNorm2d(
-            64, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn2 = nn.Dropout2d(self.dropout)
+        else:
+            self.drop_bn2 = nn.BatchNorm2d(
+                64, momentum=self.bn_momentum)
         self.relu2 = nn.ReLU()
         # batch size x 64 x 32 x 11
 
         self.layer3 = nn.Conv2d(
             in_channels=64, out_channels=128, kernel_size=3,
-            stride=1, padding=1, bias=False)
+            stride=1, padding=1, bias=self.bias)
         self.pool3 = nn.MaxPool2d(kernel_size=2)
-        self.batchnorm3 = nn.BatchNorm2d(
-            128, momentum=self.bn_momentum)
+        if self.dropout > 0:
+            self.drop_bn3 = nn.Dropout2d(self.dropout)
+        else:
+            self.drop_bn3 = nn.BatchNorm2d(
+                128, momentum=self.bn_momentum)
         self.relu3 = nn.ReLU()
         # batch size x 128 x 16 x 5
 
         self.layer4 = nn.Conv2d(
             in_channels=128, out_channels=128, kernel_size=3,
-            stride=1, padding=1, bias=False)
-        self.pool4 = nn.MaxPool2d(kernel_size=(4,2))
-        self.batchnorm4 = nn.BatchNorm2d(
-            128, momentum=self.bn_momentum)
+            stride=1, padding=1, bias=self.bias)
+        self.pool4 = nn.MaxPool2d(kernel_size=(4, 2))
+        if self.dropout > 0:
+            self.drop_bn4 = nn.Dropout2d(self.dropout)
+        else:
+            self.drop_bn4 = nn.BatchNorm2d(
+                128, momentum=self.bn_momentum)
         self.relu4 = nn.ReLU()
         # batch size x 128 x 4 x 2
 
         self.layer5 = nn.Conv2d(
             in_channels=128, out_channels=256, kernel_size=1,
-            stride=1, bias=False)
-        self.pool5 = nn.MaxPool2d(kernel_size=(4,2))
-        self.batchnorm5 = nn.BatchNorm2d(
-            256, momentum=self.bn_momentum)
+            stride=1, bias=self.bias)
+        self.pool5 = nn.MaxPool2d(kernel_size=(4, 2))
+        if self.dropout > 0:
+            self.drop_bn5 = nn.Dropout2d(self.dropout)
+        else:
+            self.drop_bn5 = nn.BatchNorm2d(
+                256, momentum=self.bn_momentum)
         self.relu5 = nn.ReLU()
         # batch size x 256 x 1 x 1
 
@@ -281,23 +315,23 @@ class ConvNetMel2D(nn.Module):
         """Execute forward pass."""
         x = self.layer1(x)
         x = self.pool1(x)
-        x = self.batchnorm1(x)
+        x = self.drop_bn1(x)
         x = self.relu1(x)
         x = self.layer2(x)
         x = self.pool2(x)
-        x = self.batchnorm2(x)
+        x = self.drop_bn2(x)
         x = self.relu2(x)
         x = self.layer3(x)
         x = self.pool3(x)
-        x = self.batchnorm3(x)
+        x = self.drop_bn3(x)
         x = self.relu3(x)
         x = self.layer4(x)
         x = self.pool4(x)
-        x = self.batchnorm4(x)
+        x = self.drop_bn4(x)
         x = self.relu4(x)
         x = self.layer5(x)
         x = self.pool5(x)
-        x = self.batchnorm5(x)
+        x = self.drop_bn5(x)
         x = self.relu5(x)
 
         return self.fc(x.view(-1, 256))
