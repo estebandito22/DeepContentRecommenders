@@ -3,6 +3,8 @@
 import base64
 import requests
 
+from selenium import webdriver
+
 from data.utils import rate_limited
 
 
@@ -85,6 +87,28 @@ class WasabiConnection(Connection):
     def __init__(self):
         """Initialize Wasabi API connection."""
         Connection.__init__(self, "https://wasabi.i3s.unice.fr")
+
+
+class AllMusicConnection(Connection):
+
+    """Class object instantiates a connection with AllMusic.com."""
+
+    def __init__(self, chromedriver_loc):
+        """Initialize AllMusic.com connection."""
+        Connection.__init__(self, "https://www.allmusic.com")
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument("--headless")
+        self.browser = webdriver.Chrome(
+            chromedriver_loc, chrome_options=chrome_options)
+
+    @rate_limited(2)
+    def query(self, query):
+        """
+        Execute an API query.
+
+        query: String containing RESTful API query.
+        """
+        self.browser.get(self.base_url + query)
 
 
 if __name__ == '__main__':

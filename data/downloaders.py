@@ -10,9 +10,17 @@ import requests
 
 import numpy as np
 import pandas as pd
+from bs4 import BeautifulSoup
+
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 from data.utils import rate_limited
-from data.Connections import WasabiConnection
+from data.connections import WasabiConnection
+from data.connections import AllMusicConnection
+
+import tqdm
 
 
 class Downloader():
@@ -69,7 +77,7 @@ class WasabiDownloader(Downloader):
             found_dir: Directory name where found song data is saved.
             notfound_dir: Directory name where not found song data is saved.
         """
-        Downloader.__init__()
+        Downloader.__init__(self, save_loc)
         self.conn = WasabiConnection()
         self.save_loc = save_loc
         self.found_loc = os.path.join(save_loc, found_dir)
@@ -247,3 +255,158 @@ class WasabiDownloader(Downloader):
                               format(track['title'], artist))
                         if not json_exists:
                             self.save_json(track, json_file)
+
+    def _get_songs_byindex(self, start_index):
+        """
+        Use a start index to retun the song data from the Wasabi API.
+
+        Args
+            wasabi_song_id: a song id from the Wasabi API.
+
+        Return
+            song data json returned from the Wasabi API.
+
+        -----------------------------------------------------------------------
+        """
+        # call the rest api and convert to json
+        success = False
+        while success is False:
+            r = self.conn.query("/api/v1/song_all/"+str(start_index))
+            if r.content == b'Too many requests, please try again later.':
+                success = False
+                time.sleep(20)
+            else:
+                success = True
+                song_data = r.json()
+
+        return song_data
+
+
+class AllMusicDownloader(Downloader):
+
+    """Downloader for AllMusic.com."""
+
+    def __init__(self, save_loc, chromedriver_loc):
+        """
+        Initialize the downloader.
+
+        Args
+            save_loc: location to save the downloaded bios.
+            chromedriver_loc: path to the chromedriver.exe
+        """
+        Downloader.__init__(self, save_loc)
+        self.conn = AllMusicConnection(chromedriver_loc)
+        self.save_loc = save_loc
+
+    def _goto_artist_from_song(self, song_query):
+        """
+        Navigate to the artist page from a song page string.
+
+        Args
+            song_query: the last part of the song page url.
+        """
+        self.conn.query("/song/"+quote(song_query, safe=''))
+        WebDriverWait(self.conn.browser, 20).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "song-artist")))
+        soup = BeautifulSoup(self.conn.browser.page_source, 'html.parser')
+        soup = BeautifulSoup(soup.decode_contents(), 'lxml')
+        soup = soup.find("h2", {"class": "song-artist"})
+        artist_link = soup.find("a")["href"]
+        self.conn.browser.get(artist_link)
+
+    def _soup_artist_page(self):
+        """
+        Soup the artist page.
+
+        Return
+            Soup of the artist page
+
+        -----------------------------------------------------------------------
+        """
+        soup = BeautifulSoup(self.conn.browser.page_source, 'html.parser')
+        soup = BeautifulSoup(soup.decode_contents(), 'lxml')
+        return soup
+
+    @staticmethod
+    def _get_artist_shortbio(artist_page_soup):
+        """
+        Extract the artist short bio.
+
+        Args
+            artist_page_soup: soup of the artist page html.
+
+        Return
+            (string) artist short bio.
+
+        -----------------------------------------------------------------------
+        """
+        return artist_page_soup.find("span", {"itemprop": "reviewBody"}).text
+
+    def _get_artist_longbio(self, artist_page_soup):
+        """
+        Extract the artist short bio.
+
+        Args
+            artist_page_soup: soup of the artist page html.
+
+        Return
+            (list of strings) each list element corresponds to a paragraph.
+
+        -----------------------------------------------------------------------
+        """
+        bio_link = artist_page_soup.find(
+            "p", {"class": "biography"}).find("a")["href"]
+        self.conn.browser.get(bio_link)
+        WebDriverWait(self.conn.browser, 20).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "text")))
+        soup = BeautifulSoup(self.conn.browser.page_source, 'html.parser')
+        soup = BeautifulSoup(soup.decode_contents(), 'lxml')
+        soup = soup.find("div", {"itemprop": "reviewBody"})
+        long_bio = [x.strip() for x in soup.text.split("\n")
+                    if (len(x.strip()) > 0 and x.find("<") == -1)]
+        return long_bio
+
+    def scrape(self, songlinks_df):
+        """
+        Scrape to collect artist short and long bios.
+
+        Args
+            songlinks_df: a dataframe with columns 'song_id' and 'url_allmusic'
+
+        Return
+            (dataframe) saves original dataframe with short and long bios.
+
+        -----------------------------------------------------------------------
+        """
+        total = songlinks_df.shape[0]
+        progress = tqdm.tqdm(total=total)
+        short_bios = []
+        long_bios = []
+        for _, row in songlinks_df.iterrows():
+            try:
+                song_url = row['url_allmusic'].split("/")[-1]
+                song_id = row['song_id']
+                try:
+                    self._goto_artist_from_song(song_url)
+                    artist_page_soup = self._soup_artist_page()
+                    short_bios += [self._get_artist_shortbio(artist_page_soup)]
+                    long_bios += [self._get_artist_longbio(artist_page_soup)]
+                except Exception:
+                    print("Did not process {}".format(song_id))
+                    short_bios += [None]
+                    long_bios += [None]
+                progress.update(1)
+            except Exception as e:
+                print(e)
+                print("Saving current progress...")
+                songlinks_df['short_bio'] = short_bios + \
+                    [None]*(total-len(short_bios))
+                songlinks_df['long_bio'] = long_bios + \
+                    [None]*(total-len(long_bios))
+                songlinks_df.to_csv(self.save_loc, index=False)
+                self.conn.browser.quit()
+
+        songlinks_df['short_bio'] = short_bios
+        songlinks_df['long_bio'] = long_bios
+        songlinks_df.to_csv(self.save_loc, index=False)
+        self.conn.browser.quit()
