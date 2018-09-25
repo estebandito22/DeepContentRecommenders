@@ -14,7 +14,6 @@ from sklearn.metrics import roc_auc_score
 from dc.pytorchdatasets import DCUEDataset
 from dc.pytorchdatasets import DCUEPredset
 from dc.pytorchdatasets import DCUEItemset
-from dc.pytorchdatasets import SubtractMean
 
 from dc.dcue.dcue import DCUENet
 
@@ -313,13 +312,10 @@ class DCUE(Trainer):
         self.triplets_txt = triplets_txt
 
         print("Loading datasets...")
-        self.load_dataset(
-            split='train', transform=SubtractMean(self.data_type))
-        self.load_dataset(
-            split='val', transform=SubtractMean(self.data_type))
-        self.load_item_dataset(transform=SubtractMean(self.data_type))
-        self.load_pred_dataset(
-            split='val', transform=SubtractMean(self.data_type))
+        self.load_dataset(split='train')
+        self.load_dataset(split='val')
+        self.load_item_dataset()
+        self.load_pred_dataset(split='val')
 
         train_loader = DataLoader(
             self.train_data, batch_size=self.batch_size, shuffle=True,
