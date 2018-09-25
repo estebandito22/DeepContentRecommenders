@@ -14,7 +14,7 @@ from dc.dcue.audiomodels.convmel1d import ConvNetMel1D
 from dc.dcue.audiomodels.convmel2d import ConvNetMel2D
 from dc.dcue.audiomodels.l3mel2d import L3NetMel2D
 
-from dc.dcue.userembedding import UserEmbeddings
+from dc.dcue.embeddings.userembedding import UserEmbeddings
 
 
 class DCUENet(nn.Module):
