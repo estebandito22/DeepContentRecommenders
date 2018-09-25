@@ -49,6 +49,9 @@ dist
 DeepContentRecommenders.egg-info
 dc/deprecated
 dc/dcue/deprecated
+dc/dcue/audiomodels/deprecated
+notes
+raw
 
 # Data Files #
 ##############
