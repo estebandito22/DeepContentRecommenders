@@ -15,9 +15,9 @@ from dc.dcbr.cf.wrmf import WRMF
 from dc.dcbr.cf.datahandler import CFDataHandler
 from dc.dcbr.cf.evaluators import cross_validate
 
-from dc.pytorchdatasets import DCBRDataset
-from dc.pytorchdatasets import DCBRPredset
-from dc.pytorchdatasets import SubtractMean
+from dc.datasets.dcbrdataset import DCBRDataset
+from dc.datasets.dcbrpredset import DCBRPredset
+from dc.datasets.transforms import SubtractMean
 
 from dc.dcbr.dcbr import DCBRNet
 

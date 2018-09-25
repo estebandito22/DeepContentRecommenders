@@ -11,9 +11,9 @@ from torch.utils.data import DataLoader
 
 from sklearn.metrics import roc_auc_score
 
-from dc.pytorchdatasets import DCUEDataset
-from dc.pytorchdatasets import DCUEPredset
-from dc.pytorchdatasets import DCUEItemset
+from dc.datasets.dcuedataset import DCUEDataset
+from dc.datasets.dcuepredset import DCUEPredset
+from dc.datasets.dcueitemset import DCUEItemset
 
 from dc.dcue.dcue import DCUENet
 
