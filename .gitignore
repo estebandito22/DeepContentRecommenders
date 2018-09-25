@@ -50,6 +50,8 @@ DeepContentRecommenders.egg-info
 dc/deprecated
 dc/dcue/deprecated
 dc/dcue/audiomodels/deprecated
+dc/dcue/languagemodels/deprecated
+dc/datasets/deprecated
 notes
 raw
 
