@@ -10,9 +10,9 @@ DOI: 10.1145/nnnnnnn.nnnnnnn
 import torch
 import torch.nn as nn
 
-from dc.dcue.audiomodel import ConvNetScatter
-from dc.dcue.audiomodel import ConvNetMel1D
-from dc.dcue.audiomodel import ConvNetMel2D
+from dc.dcue.audiomodels.convmel1d import ConvNetMel1D
+from dc.dcue.audiomodels.convmel2d import ConvNetMel2D
+from dc.dcue.audiomodels.l3mel2d import L3NetMel2D
 
 from dc.dcue.userembedding import UserEmbeddings
 
@@ -49,12 +49,12 @@ class DCUENet(nn.Module):
                      'bn_momentum': self.bn_momentum,
                      'dropout': self.dropout}
 
-        if self.model_type == 'scatter':
-            self.conv = ConvNetScatter(dict_args)
-        elif self.model_type == 'mel1d':
+        if self.model_type == 'mel1d':
             self.conv = ConvNetMel1D(dict_args)
         elif self.model_type == 'mel2d':
             self.conv = ConvNetMel2D(dict_args)
+        elif self.model_type == 'l3mel2d':
+            self.conv = L3NetMel2D(dict_args)
 
         # user embedding arguments
         dict_args = {'user_embdim': self.user_embdim,
@@ -107,7 +107,7 @@ if __name__ == '__main__':
     truth = torch.ones([2, 1])*-1
 
     dict_argstest = {'output_size': 100, 'bn_momentum': 0.5}
-    conv = ConvNetMel(dict_argstest)
+    conv = ConvNetMel1D(dict_argstest)
     sim = nn.CosineSimilarity(dim=1)
 
     utest = torch.ones([2, 100])*7
