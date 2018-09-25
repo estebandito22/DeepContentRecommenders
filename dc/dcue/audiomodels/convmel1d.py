@@ -10,13 +10,15 @@ class ConvNetMel1D(nn.Module):
 
     def __init__(self, dict_args):
         """
-        Initialize ConvNet used on data prepared with scattering transform.
+        Initialize ConvNetMel1D.
 
         Args
             dict_args: dictionary containing the following keys:
                 output_size: the output size of the network.  Corresponds to
                     the embedding dimension of the feature vectors for both
                     users and songs.
+                bn_momentum: momentum for batch normalization.
+                dropout: dropout rate.
         """
         super(ConvNetMel1D, self).__init__()
         self.output_size = dict_args["output_size"]

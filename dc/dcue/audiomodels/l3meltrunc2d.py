@@ -4,13 +4,13 @@ from torch import nn
 import numpy as np
 
 
-class L3NetMel2D(nn.Module):
+class L3NetMelTrunc2D(nn.Module):
 
     """ConvNet used on data prepared with melspectogram transform."""
 
     def __init__(self, dict_args):
         """
-        Initialize L3NetMel2D.
+        Initialize L3NetMelTrunc.
 
         Args
             dict_args: dictionary containing the following keys:
@@ -20,7 +20,7 @@ class L3NetMel2D(nn.Module):
                 bn_momentum: momentum for batch normalization.
                 dropout: dropout rate.
         """
-        super(L3NetMel2D, self).__init__()
+        super(L3NetMelTrunc2D, self).__init__()
         self.output_size = dict_args["output_size"]
         self.bn_momentum = dict_args["bn_momentum"]
         self.dropout = dict_args["dropout"]
@@ -40,6 +40,7 @@ class L3NetMel2D(nn.Module):
             self.drop_bn1 = nn.BatchNorm2d(
                 64, momentum=self.bn_momentum)
         self.relu1 = nn.ReLU()
+        self.layer_outsize1 = [64, 64, 21]
         # batch size x 64 x 63 x 21
 
         self.layer2_1 = nn.Conv2d(
@@ -55,6 +56,7 @@ class L3NetMel2D(nn.Module):
             self.drop_bn2 = nn.BatchNorm2d(
                 128, momentum=self.bn_momentum)
         self.relu2 = nn.ReLU()
+        self.layer_outsize2 = [128, 30, 9]
         # batch size x 128 x 30 x 9
 
         self.layer3_1 = nn.Conv2d(
@@ -70,6 +72,7 @@ class L3NetMel2D(nn.Module):
             self.drop_bn3 = nn.BatchNorm2d(
                 256, momentum=self.bn_momentum)
         self.relu3 = nn.ReLU()
+        self.layer_outsize3 = [256, 14, 4]
         # batch size x 256 x 14 x 4
 
         self.layer4_1 = nn.Conv2d(
@@ -85,9 +88,8 @@ class L3NetMel2D(nn.Module):
             self.drop_bn4 = nn.BatchNorm2d(
                 512, momentum=self.bn_momentum)
         self.relu4 = nn.ReLU()
+        self.layer_outsize4 = [512, 1, 1]
         # batch size x 512 x 1 x 1
-
-        self.fc = nn.Linear(512, self.output_size)
 
         # initizlize weights
         nn.init.xavier_normal_(self.layer1_1.weight, np.sqrt(2))
@@ -98,7 +100,6 @@ class L3NetMel2D(nn.Module):
         nn.init.xavier_normal_(self.layer3_2.weight, np.sqrt(2))
         nn.init.xavier_normal_(self.layer4_1.weight, np.sqrt(2))
         nn.init.xavier_normal_(self.layer4_2.weight, np.sqrt(2))
-        nn.init.xavier_normal_(self.fc.weight, np.sqrt(2))
 
     def forward(self, x):
         """Execute forward pass."""
@@ -124,4 +125,4 @@ class L3NetMel2D(nn.Module):
         x = self.drop_bn4(x)
         x = self.relu4(x)
 
-        return self.fc(x.view(-1, 512))
+        return x.view(-1, 512)

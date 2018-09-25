@@ -4,13 +4,13 @@ from torch import nn
 import numpy as np
 
 
-class ConvNetMel2D(nn.Module):
+class ConvNetMelTrunc2D(nn.Module):
 
     """ConvNet used on data prepared with melspectogram transform."""
 
     def __init__(self, dict_args):
         """
-        Initialize ConvNetMel2D.
+        Initialize ConvNetTrunc.
 
         Args
             dict_args: dictionary containing the following keys:
@@ -20,7 +20,7 @@ class ConvNetMel2D(nn.Module):
                 bn_momentum: momentum for batch normalization.
                 dropout: dropout rate.
         """
-        super(ConvNetMel2D, self).__init__()
+        super(ConvNetMelTrunc2D, self).__init__()
         self.output_size = dict_args["output_size"]
         self.bn_momentum = dict_args["bn_momentum"]
         self.dropout = dict_args["dropout"]
@@ -37,6 +37,7 @@ class ConvNetMel2D(nn.Module):
             self.drop_bn1 = nn.BatchNorm2d(
                 32, momentum=self.bn_momentum)
         self.relu1 = nn.ReLU()
+        self.layer_outsize1 = [32, 64, 22]
         # batch size x 32 x 64 x 22
 
         self.layer2 = nn.Conv2d(
@@ -49,6 +50,7 @@ class ConvNetMel2D(nn.Module):
             self.drop_bn2 = nn.BatchNorm2d(
                 64, momentum=self.bn_momentum)
         self.relu2 = nn.ReLU()
+        self.layer_outsize2 = [64, 32, 11]
         # batch size x 64 x 32 x 11
 
         self.layer3 = nn.Conv2d(
@@ -61,6 +63,7 @@ class ConvNetMel2D(nn.Module):
             self.drop_bn3 = nn.BatchNorm2d(
                 128, momentum=self.bn_momentum)
         self.relu3 = nn.ReLU()
+        self.layer_outsize3 = [128, 16, 5]
         # batch size x 128 x 16 x 5
 
         self.layer4 = nn.Conv2d(
@@ -73,6 +76,7 @@ class ConvNetMel2D(nn.Module):
             self.drop_bn4 = nn.BatchNorm2d(
                 128, momentum=self.bn_momentum)
         self.relu4 = nn.ReLU()
+        self.layer_outsize4 = [128, 4, 2]
         # batch size x 128 x 4 x 2
 
         self.layer5 = nn.Conv2d(
@@ -85,9 +89,8 @@ class ConvNetMel2D(nn.Module):
             self.drop_bn5 = nn.BatchNorm2d(
                 256, momentum=self.bn_momentum)
         self.relu5 = nn.ReLU()
+        self.layer_outsize5 = [256, 1, 1]
         # batch size x 256 x 1 x 1
-
-        self.fc = nn.Linear(256, self.output_size)
 
         # initizlize weights
         nn.init.xavier_normal_(self.layer1.weight, np.sqrt(2))
@@ -95,7 +98,6 @@ class ConvNetMel2D(nn.Module):
         nn.init.xavier_normal_(self.layer3.weight, np.sqrt(2))
         nn.init.xavier_normal_(self.layer4.weight, np.sqrt(2))
         nn.init.xavier_normal_(self.layer5.weight, np.sqrt(2))
-        nn.init.xavier_normal_(self.fc.weight, np.sqrt(2))
 
     def forward(self, x):
         """Execute forward pass."""
@@ -121,4 +123,4 @@ class ConvNetMel2D(nn.Module):
         x = self.drop_bn5(x)
         x = self.relu5(x)
 
-        return self.fc(x.view(-1, 256))
+        return x.view(-1, 256)
