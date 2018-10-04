@@ -50,7 +50,7 @@ class DCUEItemset(DCUEDataset):
             X = self._sample(X, 17, 0)
         elif self.data_type == 'mel':
             X = torch.load(self.metadata['data_mel'].loc[song_idx])
-            X = self._sample(X, 44, 1)
+            X = self._sample(X, 131, 1)
 
         sample = {'X': X, 'metadata_index': song_idx}
 

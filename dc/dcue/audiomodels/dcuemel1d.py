@@ -4,13 +4,13 @@ from torch import nn
 import numpy as np
 
 
-class ConvNetMel2D(nn.Module):
+class DcueNetMel1D(nn.Module):
 
     """ConvNet used on data prepared with melspectogram transform."""
 
     def __init__(self, dict_args):
         """
-        Initialize ConvNetMel2D.
+        Initialize ConvNetMel1D.
 
         Args
             dict_args: dictionary containing the following keys:
@@ -20,72 +20,72 @@ class ConvNetMel2D(nn.Module):
                 bn_momentum: momentum for batch normalization.
                 dropout: dropout rate.
         """
-        super(ConvNetMel2D, self).__init__()
+        super(DcueNetMel1D, self).__init__()
         self.output_size = dict_args["output_size"]
         self.bn_momentum = dict_args["bn_momentum"]
         self.dropout = dict_args["dropout"]
         self.bias = True if self.dropout > 0 else False
-        # input_size = batch size x 1 x 128 x 131
-        self.bn0 = nn.BatchNorm2d(1, momentum=self.bn_momentum)
-        self.layer1 = nn.Conv2d(
-            in_channels=1, out_channels=32, kernel_size=3,
+        # input_size = batch size x 128 x 131
+        self.bn0 = nn.BatchNorm1d(128, momentum=self.bn_momentum)
+        self.layer1 = nn.Conv1d(
+            in_channels=128, out_channels=128, kernel_size=4,
             stride=1, padding=0, bias=self.bias)
-        self.pool1 = nn.MaxPool2d(kernel_size=2)
+        self.pool1 = nn.MaxPool1d(kernel_size=2)
         if self.dropout > 0:
-            self.drop_bn1 = nn.Dropout2d(self.dropout)
+            self.drop_bn1 = nn.Dropout(self.dropout)
         else:
-            self.drop_bn1 = nn.BatchNorm2d(
-                32, momentum=self.bn_momentum)
+            self.drop_bn1 = nn.BatchNorm1d(
+                128, momentum=self.bn_momentum)
         self.relu1 = nn.ReLU()
-        # batch size x 32 x 63 x 64
+        # batch size x 128 x 64
 
-        self.layer2 = nn.Conv2d(
-            in_channels=32, out_channels=64, kernel_size=3,
+        self.layer2 = nn.Conv1d(
+            in_channels=128, out_channels=128, kernel_size=4,
             stride=1, padding=0, bias=self.bias)
-        self.pool2 = nn.MaxPool2d(kernel_size=2)
+        self.pool2 = nn.MaxPool1d(kernel_size=2)
         if self.dropout > 0:
-            self.drop_bn2 = nn.Dropout2d(self.dropout)
+            self.drop_bn2 = nn.Dropout(self.dropout)
         else:
-            self.drop_bn2 = nn.BatchNorm2d(
-                64, momentum=self.bn_momentum)
+            self.drop_bn2 = nn.BatchNorm1d(
+                128, momentum=self.bn_momentum)
         self.relu2 = nn.ReLU()
-        # batch size x 64 x 30 x 31
+        # batch size x 64 x 30
 
-        self.layer3 = nn.Conv2d(
-            in_channels=64, out_channels=128, kernel_size=3,
+        self.layer3 = nn.Conv1d(
+            in_channels=128, out_channels=128, kernel_size=4,
             stride=1, padding=0, bias=self.bias)
-        self.pool3 = nn.MaxPool2d(kernel_size=2)
+        self.pool3 = nn.MaxPool1d(kernel_size=2)
         if self.dropout > 0:
-            self.drop_bn3 = nn.Dropout2d(self.dropout)
+            self.drop_bn3 = nn.Dropout(self.dropout)
         else:
-            self.drop_bn3 = nn.BatchNorm2d(
+            self.drop_bn3 = nn.BatchNorm1d(
                 128, momentum=self.bn_momentum)
         self.relu3 = nn.ReLU()
-        # batch size x 128 x 14 x 14
+        # batch size x 128 x 13
 
-        self.layer4 = nn.Conv2d(
-            in_channels=128, out_channels=128, kernel_size=3,
+        self.layer4 = nn.Conv1d(
+            in_channels=128, out_channels=128, kernel_size=2,
             stride=1, padding=0, bias=self.bias)
-        self.pool4 = nn.MaxPool2d(kernel_size=2)
+        self.pool4 = nn.MaxPool1d(kernel_size=2)
         if self.dropout > 0:
-            self.drop_bn4 = nn.Dropout2d(self.dropout)
+            self.drop_bn4 = nn.Dropout(self.dropout)
         else:
-            self.drop_bn4 = nn.BatchNorm2d(
+            self.drop_bn4 = nn.BatchNorm1d(
                 128, momentum=self.bn_momentum)
         self.relu4 = nn.ReLU()
-        # batch size x 128 x 6 x 6
+        # batch size x 128 x 6
 
-        self.layer5 = nn.Conv2d(
+        self.layer5 = nn.Conv1d(
             in_channels=128, out_channels=256, kernel_size=1,
             stride=1, bias=self.bias)
-        self.pool5 = nn.MaxPool2d(kernel_size=4)
+        self.pool5 = nn.MaxPool1d(kernel_size=4)
         if self.dropout > 0:
-            self.drop_bn5 = nn.Dropout2d(self.dropout)
+            self.drop_bn5 = nn.Dropout(self.dropout)
         else:
-            self.drop_bn5 = nn.BatchNorm2d(
+            self.drop_bn5 = nn.BatchNorm1d(
                 256, momentum=self.bn_momentum)
         self.relu5 = nn.ReLU()
-        # batch size x 256 x 1 x 1
+        # batch size x 256 x 1
 
         self.fc = nn.Linear(256, self.output_size)
 

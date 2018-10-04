@@ -11,6 +11,8 @@ from torch.utils.data import DataLoader
 
 from sklearn.metrics import roc_auc_score
 
+from tqdm import tqdm
+
 from dc.datasets.dcuedataset import DCUEDataset
 from dc.datasets.dcuepredset import DCUEPredset
 from dc.datasets.dcueitemset import DCUEItemset
@@ -188,7 +190,7 @@ class DCUE(Trainer):
         samples_processed = 0
         losses_processed = 0
 
-        for batch_samples in loader:
+        for batch_samples in tqdm(loader):
 
             # prepare training sample
             u = batch_samples['u']
@@ -237,7 +239,7 @@ class DCUE(Trainer):
         losses_processed = 0
 
         with torch.no_grad():
-            for batch_samples in loader:
+            for batch_samples in tqdm(loader):
 
                 # prepare training sample
                 u = batch_samples['u']
