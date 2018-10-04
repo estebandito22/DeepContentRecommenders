@@ -25,7 +25,7 @@ class L3NetMelTrunc2D(nn.Module):
         self.bn_momentum = dict_args["bn_momentum"]
         self.dropout = dict_args["dropout"]
         self.bias = True if self.dropout > 0 else False
-        # input_size = batch size x 1 x 128 x 44
+        # input_size = batch size x 1 x 128 x 131
         self.bn0 = nn.BatchNorm2d(1, momentum=self.bn_momentum)
         self.layer1_1 = nn.Conv2d(
             in_channels=1, out_channels=64, kernel_size=2,
@@ -40,8 +40,8 @@ class L3NetMelTrunc2D(nn.Module):
             self.drop_bn1 = nn.BatchNorm2d(
                 64, momentum=self.bn_momentum)
         self.relu1 = nn.ReLU()
-        self.layer_outsize1 = [64, 64, 21]
-        # batch size x 64 x 63 x 21
+        self.layer_outsize1 = [64, 63, 64]
+        # batch size x 64 x 63 x 64
 
         self.layer2_1 = nn.Conv2d(
             in_channels=64, out_channels=128, kernel_size=2,
@@ -56,8 +56,8 @@ class L3NetMelTrunc2D(nn.Module):
             self.drop_bn2 = nn.BatchNorm2d(
                 128, momentum=self.bn_momentum)
         self.relu2 = nn.ReLU()
-        self.layer_outsize2 = [128, 30, 9]
-        # batch size x 128 x 30 x 9
+        self.layer_outsize2 = [128, 30, 31]
+        # batch size x 128 x 30 x 31
 
         self.layer3_1 = nn.Conv2d(
             in_channels=128, out_channels=256, kernel_size=2,
@@ -72,8 +72,8 @@ class L3NetMelTrunc2D(nn.Module):
             self.drop_bn3 = nn.BatchNorm2d(
                 256, momentum=self.bn_momentum)
         self.relu3 = nn.ReLU()
-        self.layer_outsize3 = [256, 14, 4]
-        # batch size x 256 x 14 x 4
+        self.layer_outsize3 = [256, 14, 14]
+        # batch size x 256 x 14 x 14
 
         self.layer4_1 = nn.Conv2d(
             in_channels=256, out_channels=512, kernel_size=2,
@@ -81,7 +81,7 @@ class L3NetMelTrunc2D(nn.Module):
         self.layer4_2 = nn.Conv2d(
             in_channels=512, out_channels=512, kernel_size=2,
             stride=1, padding=0, bias=self.bias)
-        self.pool4 = nn.MaxPool2d(kernel_size=(7, 2))
+        self.pool4 = nn.MaxPool2d(kernel_size=7)
         if self.dropout > 0:
             self.drop_bn4 = nn.Dropout2d(self.dropout)
         else:

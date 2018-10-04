@@ -29,7 +29,8 @@ class RecurrentNet(nn.Module):
         self.attention = dict_args["attention"]
 
         # lstm
-        self.hidden = self.init_hidden(self.batch_size)
+        self.hidden = None
+        self.init_hidden(self.batch_size)
 
         self.rnn = nn.GRUCell(
             self.word_embdim + self.conv_outsize, self.hidden_size)
@@ -45,26 +46,27 @@ class RecurrentNet(nn.Module):
     def init_hidden(self, batch_size):
         """Initialize the hidden state of the RNN."""
         if torch.cuda.is_available():
-            return torch.zeros(batch_size, self.hidden_size).cuda()
-
-        self.hidden = torch.zeros(batch_size, self.hidden_size)
+            self.hidden = torch.zeros(batch_size, self.hidden_size).cuda()
+        else:
+            self.hidden = torch.zeros(batch_size, self.hidden_size)
 
     def detach_hidden(self, batch_size):
         """Detach the hidden state of the RNN."""
         hidden_batch_size, _ = self.hidden.size()
         if hidden_batch_size != batch_size:
-            return self.init_hidden(batch_size)
+            self.init_hidden(batch_size)
         else:
             detached_hidden = self.hidden.detach()
             detached_hidden.zero_()
-
-        self.hidden = detached_hidden
+            self.hidden = detached_hidden
 
     def forward(self, seqembd, convfeatvects):
         """Forward pass."""
         # init output tensor
         seqlen, batch_size, _ = seqembd.size()
         log_probs = torch.zeros([seqlen, batch_size, self.vocab_size])
+        if torch.cuda.is_available():
+            log_probs = log_probs.cuda()
 
         for i in range(seqlen):
             i_t = seqembd[i]

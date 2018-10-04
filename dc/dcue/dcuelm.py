@@ -6,6 +6,7 @@ import torch.nn as nn
 from dc.dcue.audiomodels.convmel1d import ConvNetMel1D
 from dc.dcue.audiomodels.convmel2d import ConvNetMel2D
 from dc.dcue.audiomodels.l3mel2d import L3NetMel2D
+from dc.dcue.audiomodels.l3mel2dsmall import L3NetMel2DSmall
 
 from dc.dcue.audiomodels.convmeltrunc2d import ConvNetMelTrunc2D
 from dc.dcue.audiomodels.l3meltrunc2d import L3NetMelTrunc2D
@@ -62,6 +63,9 @@ class DCUELMNet(nn.Module):
             self.conv_outsize = self.feature_dim
         elif self.model_type == 'l3mel2d':
             self.conv = L3NetMel2D(dict_args)
+            self.conv_outsize = self.feature_dim
+        elif self.model_type == 'l3mel2dsmall':
+            self.conv = L3NetMel2DSmall(dict_args)
             self.conv_outsize = self.feature_dim
         elif self.model_type == 'l3meltrunc2d':
             self.conv = L3NetMelTrunc2D(dict_args)
@@ -122,7 +126,7 @@ class DCUELMNet(nn.Module):
 
         # language model
         pos_featvects, pos_outputs, neg_featvects, neg_outputs = self.lm(
-            u_featvects, posseq, pos_convfeatvects, negseq, neg_convfeatvects)
+            posseq, pos_convfeatvects, negseq, neg_convfeatvects)
 
         # pos and neg scores
         pos_scores = self.sim(u_featvects, pos_featvects)

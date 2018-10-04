@@ -54,7 +54,7 @@ class LanguageModel(nn.Module):
         self.fc = nn.Linear(
             self.hidden_size + self.conv_outsize, self.feature_dim)
 
-    def _pos_forward(self, posseq, pos_convfeatvects, u_featvects):
+    def _pos_forward(self, posseq, pos_convfeatvects):
         pos_convfeatvects = pos_convfeatvects.squeeze()
 
         # word embeddings
@@ -74,7 +74,7 @@ class LanguageModel(nn.Module):
 
         return pos_featvects, pos_rnn_log_probs.permute(1, 2, 0)
 
-    def _neg_forward(self, negseq, neg_convfeatvects, u_featvects):
+    def _neg_forward(self, negseq, neg_convfeatvects):
         neg_convfeatvects = neg_convfeatvects.squeeze()
 
         # word embeddings
@@ -100,19 +100,19 @@ class LanguageModel(nn.Module):
 
         return neg_featvects, neg_rnn_log_probs.permute(1, 2, 0)
 
-    def forward(self, u_featvects, posseq, pos_convfeatvects, negseq=None,
-                neg_convfeatvects=None):
+    def forward(self, posseq, pos_convfeatvects,
+                negseq=None, neg_convfeatvects=None):
         """Forward pass."""
         if negseq is not None and neg_convfeatvects is not None:
             pos_featvects, pos_outputs = self._pos_forward(
-                posseq, pos_convfeatvects, u_featvects)
+                posseq, pos_convfeatvects)
 
             neg_featvects, neg_outputs = self._neg_forward(
-                negseq, neg_convfeatvects, u_featvects)
+                negseq, neg_convfeatvects)
 
         else:
             pos_featvects, pos_outputs = self._pos_forward(
-                posseq, pos_convfeatvects, u_featvects)
+                posseq, pos_convfeatvects)
 
             neg_featvects, neg_outputs = (None, None)
 
