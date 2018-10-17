@@ -6,8 +6,8 @@ import numpy as np
 from dc.nn.dcuelm import DCUELM
 
 
-def main(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
-         beta_one, beta_two, eps, weight_decay, num_epochs, bn_momentum,
+def main(feature_dim, batch_size, neg_batch_size, u_embdim, margin, optimize,
+         lr, beta_one, beta_two, eps, weight_decay, num_epochs, bn_momentum,
          dropout, model_type, data_type, n_users, n_items, eval_pct,
          word_embdim, word_embeddings, hidden_size, dropout_rnn, vocab_size,
          attention, triplets_txt, metadata_csv, save_dir):
@@ -16,10 +16,10 @@ def main(feature_dim, batch_size, neg_batch_size, u_embdim, margin, lr,
         word_embeddings = np.loadtxt(word_embeddings)
 
     dcue = DCUELM(feature_dim, batch_size, neg_batch_size, u_embdim, margin,
-                  lr, beta_one, beta_two, eps, weight_decay, num_epochs,
-                  bn_momentum, dropout, model_type, data_type, n_users,
-                  n_items, eval_pct, word_embdim, word_embeddings, hidden_size,
-                  dropout_rnn, vocab_size, attention)
+                  optimize, lr, beta_one, beta_two, eps, weight_decay,
+                  num_epochs, bn_momentum, dropout, model_type, data_type,
+                  n_users, n_items, eval_pct, word_embdim, word_embeddings,
+                  hidden_size, dropout_rnn, vocab_size, attention)
 
     dcue.fit(triplets_txt, metadata_csv, save_dir)
 
@@ -60,6 +60,8 @@ if __name__ == '__main__':
                     help="Dimension of the user embedding")
     ap.add_argument("-m", "--margin", type=float,
                     help="Margin to use in hinge loss")
+    ap.add_argument("-op", "--optimize", default='adam',
+                    help="Which optimizer to use.")
     ap.add_argument("-lr", "--learning_rate", type=float, default=0.001,
                     help="Learning rate to use in ADAM")
     ap.add_argument("-b1", "--beta_one", type=float, default=0.9,
@@ -112,6 +114,7 @@ if __name__ == '__main__':
          args['neg_batch_size'],
          args['u_embdim'],
          args['margin'],
+         args['optimize'],
          args['learning_rate'],
          args['beta_one'],
          args['beta_two'],

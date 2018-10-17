@@ -15,6 +15,7 @@ from dc.dcue.audiomodels.convmel2d import ConvNetMel2D
 from dc.dcue.audiomodels.l3mel2d import L3NetMel2D
 from dc.dcue.audiomodels.l3mel2dsmall import L3NetMel2DSmall
 from dc.dcue.audiomodels.dcuemel1d import DcueNetMel1D
+from dc.dcue.audiomodels.dcuemel1dnobn import DcueNetMel1DNoBN
 
 from dc.dcue.embeddings.userembedding import UserEmbeddings
 
@@ -61,6 +62,11 @@ class DCUENet(nn.Module):
             self.conv = L3NetMel2DSmall(dict_args)
         elif self.model_type == 'dcuemel1d':
             self.conv = DcueNetMel1D(dict_args)
+        elif self.model_type == 'dcuemel1dnobn':
+            self.conv = DcueNetMel1DNoBN(dict_args)
+        else:
+            raise ValueError(
+                "{} is not a recognized model type!".format(self.model_type))
 
         # user embedding arguments
         dict_args = {'user_embdim': self.user_embdim,

@@ -1,5 +1,6 @@
 """Datasets for training models in PyTorch."""
 
+from collections import defaultdict
 import numpy as np
 import pandas as pd
 import torch
@@ -14,7 +15,8 @@ class DCUEDataset(Dataset):
 
     def __init__(self, triplets_txt, metadata_csv, neg_samples=None,
                  split='train', data_type='mel', n_users=20000, n_items=10000,
-                 transform=None, excluded_ids=None, random_seed=None):
+                 transform=None, excluded_ids=None, random_seed=None,
+                 batch_songs=False):
         """
         Initialize DCUE dataset.
 
@@ -37,6 +39,9 @@ class DCUEDataset(Dataset):
         self.transform = transform
         self.excluded_ids = excluded_ids
         self.random_seed = random_seed
+        self.batch_songs = batch_songs
+        self.song_batches = None
+        self.Xs = None
 
         # load audio metadata dataset
         self._load_metadata()
@@ -126,6 +131,34 @@ class DCUEDataset(Dataset):
             raise ValueError("dim must be 0 or 1.")
         return X
 
+    def randomize_songs(self, n_active=300):
+        """Return batches of random song ids."""
+        np.random.shuffle(self.uniq_songs)
+        s = 0
+        batches = []
+        while s < len(self.uniq_songs):
+            batches += [self.uniq_songs[s:s + n_active]]
+            s = s + n_active
+        self.song_batches = batches
+        return batches
+
+    def load_song_batch(self, i):
+        """Pre-load songs for song_batch processing."""
+        if self.song_batches is None:
+            raise RuntimeError(
+                "Must call randomize_songs() before load_song_batch!")
+        song_ids = self.song_batches[i]
+        self.Xs = defaultdict(list)
+        for song_id in song_ids:
+            song_idx = self.songid2metaindex[song_id]
+            if self.data_type == 'scatter':
+                X = torch.load(self.metadata['data'].loc[song_idx])
+                X = self._sample(X, 17, 0)
+            elif self.data_type == 'mel':
+                X = torch.load(self.metadata['data_mel'].loc[song_idx])
+                X = self._sample(X, 131, 1)
+            self.Xs[song_idx] = X
+
     def __len__(self):
         """Return length of the dataset."""
         return self.dh.triplets_df.shape[0]
@@ -137,12 +170,15 @@ class DCUEDataset(Dataset):
         song_idx = self.songid2metaindex[song_id]
 
         # load torch positive tensor
-        if self.data_type == 'scatter':
-            X = torch.load(self.metadata['data'].loc[song_idx])
-            X = self._sample(X, 17, 0)
-        elif self.data_type == 'mel':
-            X = torch.load(self.metadata['data_mel'].loc[song_idx])
-            X = self._sample(X, 131, 1)
+        if self.batch_songs:
+            X = self.Xs[song_idx]
+        else:
+            if self.data_type == 'scatter':
+                X = torch.load(self.metadata['data'].loc[song_idx])
+                X = self._sample(X, 17, 0)
+            elif self.data_type == 'mel':
+                X = torch.load(self.metadata['data_mel'].loc[song_idx])
+                X = self._sample(X, 131, 1)
 
         # returned for user embedding
         user_idx = self.dh.user_index[self.dh.triplets_df.iloc[i]['user_id']]

@@ -13,7 +13,8 @@ class DCUELMDataset(DCUEDataset):
 
     def __init__(self, triplets_txt, metadata_csv, neg_samples=None,
                  split='train', data_type='mel', n_users=20000, n_items=10000,
-                 transform=None, excluded_ids=None, random_seed=None):
+                 transform=None, excluded_ids=None, random_seed=None,
+                 batch_songs=False):
         """
         Initialize DCUELM dataset.
 
@@ -30,7 +31,8 @@ class DCUELMDataset(DCUEDataset):
         """
         DCUEDataset.__init__(
             self, triplets_txt, metadata_csv, neg_samples, split, data_type,
-            n_users, n_items, transform, excluded_ids, random_seed)
+            n_users, n_items, transform, excluded_ids, random_seed,
+            batch_songs)
 
     def __getitem__(self, i):
         """Return a sample from the dataset."""
@@ -39,12 +41,15 @@ class DCUELMDataset(DCUEDataset):
         song_idx = self.songid2metaindex[song_id]
 
         # load torch positive tensor
-        if self.data_type == 'scatter':
-            X = torch.load(self.metadata['data'].loc[song_idx])
-            X = self._sample(X, 17, 0)
-        elif self.data_type == 'mel':
-            X = torch.load(self.metadata['data_mel'].loc[song_idx])
-            X = self._sample(X, 131, 1)
+        if self.batch_songs:
+            X = self.Xs[song_idx]
+        else:
+            if self.data_type == 'scatter':
+                X = torch.load(self.metadata['data'].loc[song_idx])
+                X = self._sample(X, 17, 0)
+            elif self.data_type == 'mel':
+                X = torch.load(self.metadata['data_mel'].loc[song_idx])
+                X = self._sample(X, 131, 1)
 
         # returned for user embedding
         user_idx = self.dh.user_index[self.dh.triplets_df.iloc[i]['user_id']]

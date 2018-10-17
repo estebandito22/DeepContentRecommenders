@@ -2,24 +2,24 @@
 
 import os
 import datetime
+import warnings
 import numpy as np
+from tqdm import tqdm
+from sklearn.metrics import roc_auc_score
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-
-from sklearn.metrics import roc_auc_score
-
-from tqdm import tqdm
+from torch.utils.data.dataset import Subset
+from torch.optim.lr_scheduler import MultiStepLR
 
 from dc.datasets.dcuedataset import DCUEDataset
 from dc.datasets.dcuepredset import DCUEPredset
 from dc.datasets.dcueitemset import DCUEItemset
-
 from dc.dcue.dcue import DCUENet
-
 from dc.nn.trainer import Trainer
+from dc.optim.swats import Swats
 
 
 class DCUE(Trainer):
@@ -27,10 +27,11 @@ class DCUE(Trainer):
     """Class to train and evaluate DCUE model."""
 
     def __init__(self, feature_dim=100, batch_size=64, neg_batch_size=20,
-                 u_embdim=300, margin=0.2, lr=0.00001, beta_one=0.9,
-                 beta_two=0.99, eps=1e-8, weight_decay=0, num_epochs=100,
-                 bn_momentum=0.5, dropout=0, model_type='mel', data_type='mel',
-                 n_users=20000, n_items=10000, eval_pct=0.025):
+                 u_embdim=300, margin=0.2, optimize='adam', lr=0.00001,
+                 beta_one=0.9, beta_two=0.99, eps=1e-8, weight_decay=0,
+                 num_epochs=100, bn_momentum=0.5, dropout=0, model_type='mel',
+                 data_type='mel', n_users=20000, n_items=10000,
+                 eval_pct=0.025):
         """
         Initialize DCUE model.
 
@@ -60,6 +61,7 @@ class DCUE(Trainer):
         self.neg_batch_size = neg_batch_size
         self.u_embdim = u_embdim
         self.margin = margin
+        self.optimize = optimize
         self.lr = lr
         self.beta_one = beta_one
         self.beta_two = beta_two
@@ -73,6 +75,10 @@ class DCUE(Trainer):
         self.n_users = n_users
         self.n_items = n_items
         self.eval_pct = eval_pct
+
+        if self.batch_size <= self.neg_batch_size:
+            warnings.warn("Batch size is less than or equal to negative batch\
+             size. Negative batch size is effectively batch size - 1.")
 
         # Dataset attributes
         self.model_dir = None
@@ -88,6 +94,7 @@ class DCUE(Trainer):
         # Model attributes
         self.model = None
         self.optimizer = None
+        self.scheduler = None
         self.loss_func = None
         self.dict_args = None
         self.nn_epoch = None
@@ -117,21 +124,21 @@ class DCUE(Trainer):
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids)
+                excluded_ids=excluded_ids, batch_songs=True)
 
         elif split == 'val':
             self.val_data = DCUEDataset(
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids, random_seed=10)
+                excluded_ids=excluded_ids, random_seed=10, batch_songs=True)
 
         elif split == 'test':
             self.test_data = DCUEDataset(
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids, random_seed=10)
+                excluded_ids=excluded_ids, random_seed=10, batch_songs=True)
 
     def load_pred_dataset(self, split, transform=None, excluded_ids=None):
         """
@@ -174,71 +181,37 @@ class DCUE(Trainer):
         self.model = DCUENet(self.dict_args)
 
         self.loss_func = nn.HingeEmbeddingLoss(margin=self.margin)
-        self.optimizer = optim.Adam(
-            self.model.parameters(), self.lr,
-            (self.beta_one, self.beta_two),
-            self.eps, self.weight_decay)
+        if self.optimize == 'adam':
+            self.optimizer = optim.Adam(
+                self.model.parameters(), self.lr,
+                (self.beta_one, self.beta_two),
+                self.eps, self.weight_decay)
+        elif self.optimize == 'sgd':
+            self.optimizer = optim.SGD(
+                self.model.parameters(), self.lr, self.beta_one,
+                weight_decay=self.weight_decay, nesterov=True)
+        elif self.optimize == 'swats':
+            self.optimizer = Swats(
+                self.model.parameters(), self.lr,
+                (self.beta_one, self.beta_two),
+                self.eps, self.weight_decay)
+
+        self.scheduler = MultiStepLR(
+            self.optimizer, milestones=[4, 9], gamma=0.1)
 
         if self.USE_CUDA:
             self.model = self.model.cuda()
             self.loss_func = self.loss_func.cuda()
 
-    def _train_epoch(self, loader):
+    def _train_epoch(self, loaders):
         """Train epoch."""
         self.model.train()
         train_loss = 0
         samples_processed = 0
         losses_processed = 0
 
-        for batch_samples in tqdm(loader):
-
-            # prepare training sample
-            u = batch_samples['u']
-            y = batch_samples['y']
-            # batch size x seqdim x seqlen
-            pos = batch_samples['X']
-            # batch size x neg batch size x seqdim x seqlen
-            neg = self._withinbatch_negsample(pos)
-
-            if self.model_type.find('2d') > -1:
-                # batch size x 1 x seqdim x seqlen
-                pos = pos.unsqueeze(1)
-                # batch size x neg batch size x 1 x seqdim x seqlen
-                neg = neg.unsqueeze(2)
-
-            if self.USE_CUDA:
-                u = u.cuda()
-                y = y.cuda()
-                pos = pos.cuda()
-                neg = neg.cuda()
-
-            # forward pass
-            self.model.zero_grad()
-            preds = self.model(u, pos, neg)
-
-            # backward pass
-            loss = self.loss_func(preds, y)
-            loss.backward()
-            self.optimizer.step()
-
-            # compute train loss
-            samples_processed += pos.size()[0]
-            losses_processed += preds.numel()
-
-            train_loss += loss.item() * preds.numel()
-
-        train_loss /= losses_processed
-
-        return samples_processed, train_loss
-
-    def _eval_epoch(self, loader):
-        """Eval epoch."""
-        self.model.eval()
-        val_loss = 0
-        samples_processed = 0
-        losses_processed = 0
-
-        with torch.no_grad():
+        for i, loader in enumerate(loaders):
+            loader.dataset.dataset.load_song_batch(i)
             for batch_samples in tqdm(loader):
 
                 # prepare training sample
@@ -262,17 +235,68 @@ class DCUE(Trainer):
                     neg = neg.cuda()
 
                 # forward pass
+                self.model.zero_grad()
                 preds = self.model(u, pos, neg)
 
-                # compute loss
+                # backward pass
                 loss = self.loss_func(preds, y)
+                loss.backward()
+                self.optimizer.step()
 
+                # compute train loss
                 samples_processed += pos.size()[0]
                 losses_processed += preds.numel()
 
-                val_loss += loss.item() * preds.numel()
+                train_loss += loss.item() * preds.numel()
 
-            val_loss /= losses_processed
+            train_loss /= losses_processed
+
+        return samples_processed, train_loss
+
+    def _eval_epoch(self, loaders):
+        """Eval epoch."""
+        self.model.eval()
+        val_loss = 0
+        samples_processed = 0
+        losses_processed = 0
+
+        with torch.no_grad():
+            for i, loader in enumerate(loaders):
+                loader.dataset.dataset.load_song_batch(i)
+                for batch_samples in tqdm(loader):
+
+                    # prepare training sample
+                    u = batch_samples['u']
+                    y = batch_samples['y']
+                    # batch size x seqdim x seqlen
+                    pos = batch_samples['X']
+                    # batch size x neg batch size x seqdim x seqlen
+                    neg = self._withinbatch_negsample(pos)
+
+                    if self.model_type.find('2d') > -1:
+                        # batch size x 1 x seqdim x seqlen
+                        pos = pos.unsqueeze(1)
+                        # batch size x neg batch size x 1 x seqdim x seqlen
+                        neg = neg.unsqueeze(2)
+
+                    if self.USE_CUDA:
+                        u = u.cuda()
+                        y = y.cuda()
+                        pos = pos.cuda()
+                        neg = neg.cuda()
+
+                    # forward pass
+                    preds = self.model(u, pos, neg)
+
+                    # compute loss
+                    loss = self.loss_func(preds, y)
+
+                    samples_processed += pos.size()[0]
+                    losses_processed += preds.numel()
+
+                    val_loss += loss.item() * preds.numel()
+
+                val_loss /= losses_processed
 
         return samples_processed, val_loss
 
@@ -292,6 +316,7 @@ class DCUE(Trainer):
                User Embedding Dim: {}\n\
                Margin: {}\n\
                Dropout: {}\n\
+               Optimizer: {}\n\
                Learning Rate: {}\n\
                Beta One: {}\n\
                Beta Two: {}\n\
@@ -302,12 +327,14 @@ class DCUE(Trainer):
                Data Type: {}\n\
                Num Users: {}\n\
                Num Items: {}\n\
+               BN Momentum: {}\n\
                Save Dir: {}".format(
                    self.feature_dim, self.batch_size, self.neg_batch_size,
-                   self.u_embdim, self.margin, self.dropout, self.lr,
-                   self.beta_one, self.beta_two, self.eps, self.weight_decay,
-                   self.num_epochs, self.model_type, self.data_type,
-                   self.n_users, self.n_items, save_dir))
+                   self.u_embdim, self.margin, self.dropout, self.optimize,
+                   self.lr, self.beta_one, self.beta_two, self.eps,
+                   self.weight_decay, self.num_epochs, self.model_type,
+                   self.data_type, self.n_users, self.n_items,
+                   self.bn_momentum, save_dir))
 
         self.model_dir = save_dir
         self.metadata_csv = metadata_csv
@@ -319,12 +346,6 @@ class DCUE(Trainer):
         self.load_item_dataset()
         self.load_pred_dataset(split='val')
 
-        train_loader = DataLoader(
-            self.train_data, batch_size=self.batch_size, shuffle=True,
-            num_workers=4)
-        val_loader = DataLoader(
-            self.val_data, batch_size=self.batch_size, shuffle=True,
-            num_workers=4)
         pred_loader = DataLoader(
             self.pred_data, batch_size=1024, shuffle=True, num_workers=4)
 
@@ -340,9 +361,11 @@ class DCUE(Trainer):
         for epoch in range(self.num_epochs + 1):
             self.nn_epoch = epoch
             if epoch > 0:
+                self.scheduler.step()
                 print("Initializing train epoch...")
                 start = datetime.datetime.now()
-                sp, train_loss = self._train_epoch(train_loader)
+                train_loaders = self._batch_loaders(self.train_data)
+                sp, train_loss = self._train_epoch(train_loaders)
                 samples_processed += sp
                 end = datetime.datetime.now()
                 print("Train epoch processed in {}".format(end-start))
@@ -356,7 +379,8 @@ class DCUE(Trainer):
                 # compute loss
                 print("Initializing val epoch...")
                 start = datetime.datetime.now()
-                _, val_loss = self._eval_epoch(val_loader)
+                val_loaders = self._batch_loaders(self.val_data)
+                _, val_loss = self._eval_epoch(val_loaders)
                 end = datetime.datetime.now()
                 print("Val epoch processed in {}".format(end-start))
 
@@ -458,8 +482,9 @@ class DCUE(Trainer):
 
     def _update_best(self, val_auc, val_loss):
 
-        if val_auc > self.best_auc:
+        if val_loss < self.best_val_loss:
             self.best_auc = val_auc
+            self.best_val_loss = val_loss
 
             if self.best_item_factors is None or \
                self.best_user_factors is None:
@@ -472,9 +497,6 @@ class DCUE(Trainer):
             self.best_user_factors.copy_(self.user_factors)
 
             self.save(models_dir=self.model_dir)
-
-        if val_loss < self.best_val_loss:
-            self.best_val_loss = val_loss
 
     def _compute_auc(self, split, loader, pct=0.025):
         self._user_factors()
@@ -546,6 +568,19 @@ class DCUE(Trainer):
 
         return neg
 
+    def _batch_loaders(self, dataset):
+        song_batches = dataset.randomize_songs(n_active=10000)
+        loaders = []
+        for song_batch in song_batches:
+            mask = np.in1d(dataset.dh.triplets_df['song_id'], song_batch)
+            song_indexes = np.where(mask)[0].tolist()
+            subset = Subset(dataset, song_indexes)
+            loader = DataLoader(
+                subset, batch_size=self.batch_size, shuffle=True,
+                num_workers=4)
+            loaders += [loader]
+        return loaders
+
     def save(self, models_dir=None):
         """
         Save model.
@@ -555,10 +590,10 @@ class DCUE(Trainer):
         """
         if (self.model is not None) and (models_dir is not None):
 
-            model_dir = "DCUE_do_{}_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}_mt_{}".\
-                format(self.dropout, self.lr, self.beta_one, self.beta_two,
-                       self.weight_decay, self.n_users, self.n_items,
-                       self.model_type)
+            model_dir = "DCUE_do_{}_op_{}_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}_mt_{}_bn_{}".\
+                format(self.dropout, self.optimize, self.lr, self.beta_one,
+                       self.beta_two, self.weight_decay, self.n_users,
+                       self.n_items, self.model_type, self.bn_momentum)
 
             if not os.path.isdir(os.path.join(models_dir, model_dir)):
                 os.makedirs(os.path.join(models_dir, model_dir))

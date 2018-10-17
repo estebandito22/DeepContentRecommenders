@@ -84,7 +84,7 @@ class LanguageModel(nn.Module):
 
         # detach the hidden state of the rnn and perform forward pass on
         # rnn sequence.
-        self.rnn.detach_hidden(batch_size * neg_batch_size)
+        self.rnn.init_hidden(batch_size * neg_batch_size)
         neg_rnn_log_probs, neg_rnn_hidden = self.rnn(
             seqembd, neg_convfeatvects)
 

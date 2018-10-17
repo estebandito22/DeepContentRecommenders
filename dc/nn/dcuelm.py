@@ -3,20 +3,19 @@
 import os
 import datetime
 import numpy as np
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-
-from tqdm import tqdm
-
-from dc.datasets.dcuelmdataset import DCUELMDataset
-from dc.datasets.dcuelmitemset import DCUELMItemset
-
-from dc.dcue.dcuelm import DCUELMNet
+from torch.optim.lr_scheduler import MultiStepLR
 
 from dc.nn.dcue import DCUE
+from dc.optim.swats import Swats
+from dc.dcue.dcuelm import DCUELMNet
+from dc.datasets.dcuelmdataset import DCUELMDataset
+from dc.datasets.dcuelmitemset import DCUELMItemset
 
 
 class DCUELM(DCUE):
@@ -24,17 +23,18 @@ class DCUELM(DCUE):
     """Trainer for DCUELM model."""
 
     def __init__(self, feature_dim=100, batch_size=64, neg_batch_size=20,
-                 u_embdim=300, margin=0.2, lr=0.01, beta_one=0.9,
-                 beta_two=0.99, eps=1e-8, weight_decay=0, num_epochs=100,
-                 bn_momentum=0.5, dropout=0, model_type='mel', data_type='mel',
-                 n_users=20000, n_items=10000, eval_pct=0.025, word_embdim=300,
-                 word_embeddings=None, hidden_size=512, dropout_rnn=0,
-                 vocab_size=20000, attention=False, loss_alpha=0.5):
+                 u_embdim=300, margin=0.2, optimize='adam', lr=0.01,
+                 beta_one=0.9, beta_two=0.99, eps=1e-8, weight_decay=0,
+                 num_epochs=100, bn_momentum=0.5, dropout=0, model_type='mel',
+                 data_type='mel', n_users=20000, n_items=10000, eval_pct=0.025,
+                 word_embdim=300, word_embeddings=None, hidden_size=512,
+                 dropout_rnn=0, vocab_size=20000, attention=False,
+                 loss_alpha=0.5, freeze_conv=True):
         """Initialize DCUELM trainer."""
         DCUE.__init__(self, feature_dim, batch_size, neg_batch_size, u_embdim,
-                      margin, lr, beta_one, beta_two, eps, weight_decay,
-                      num_epochs, bn_momentum, dropout, model_type, data_type,
-                      n_users, n_items, eval_pct)
+                      margin, optimize, lr, beta_one, beta_two, eps,
+                      weight_decay, num_epochs, bn_momentum, dropout,
+                      model_type, data_type, n_users, n_items, eval_pct)
 
         self.word_embdim = word_embdim
         self.word_embeddings = word_embeddings
@@ -43,6 +43,7 @@ class DCUELM(DCUE):
         self.vocab_size = vocab_size
         self.attention = attention
         self.loss_alpha = loss_alpha
+        self.freeze_conv = freeze_conv
 
         self.side_loss_func = None
 
@@ -60,21 +61,21 @@ class DCUELM(DCUE):
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids)
+                excluded_ids=excluded_ids, batch_songs=True)
 
         elif split == 'val':
             self.val_data = DCUELMDataset(
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids, random_seed=10)
+                excluded_ids=excluded_ids, random_seed=10, batch_songs=True)
 
         elif split == 'test':
             self.test_data = DCUELMDataset(
                 self.triplets_txt, self.metadata_csv, self.neg_batch_size,
                 split, data_type=self.data_type, n_users=self.n_users,
                 n_items=self.n_items, transform=transform,
-                excluded_ids=excluded_ids, random_seed=10)
+                excluded_ids=excluded_ids, random_seed=10, batch_songs=True)
 
     def load_item_dataset(self, transform=None, excluded_ids=None):
         """
@@ -108,19 +109,36 @@ class DCUELM(DCUE):
 
         self.model = DCUELMNet(self.dict_args)
 
+        if self.freeze_conv:
+            for param in self.model.conv.parameters():
+                param.requires_grad = False
+
         self.loss_func = nn.HingeEmbeddingLoss(margin=self.margin)
         self.side_loss_func = nn.NLLLoss()
-        self.optimizer = optim.Adam(
-            self.model.parameters(), self.lr,
-            (self.beta_one, self.beta_two),
-            self.eps, self.weight_decay)
+        if self.optimize == 'adam':
+            self.optimizer = optim.Adam(
+                self.model.parameters(), self.lr,
+                (self.beta_one, self.beta_two),
+                self.eps, self.weight_decay)
+        elif self.optimize == 'sgd':
+            self.optimizer = optim.SGD(
+                self.model.parameters(), self.lr, self.beta_one,
+                weight_decay=self.weight_decay, nesterov=True)
+        elif self.optimize == 'swats':
+            self.optimizer = Swats(
+                self.model.parameters(), self.lr,
+                (self.beta_one, self.beta_two),
+                self.eps, self.weight_decay)
+
+        self.scheduler = MultiStepLR(
+            self.optimizer, milestones=[4, 9], gamma=0.1)
 
         if self.USE_CUDA:
             self.model = self.model.cuda()
             self.loss_func = self.loss_func.cuda()
             self.side_loss_func = self.side_loss_func.cuda()
 
-    def _train_epoch(self, loader):
+    def _train_epoch(self, loaders):
         """Train epoch."""
         self.model.train()
         train_loss = 0
@@ -128,72 +146,8 @@ class DCUELM(DCUE):
         samples_processed = 0
         losses_processed = 0
 
-        for batch_samples in tqdm(loader):
-
-            # prepare training sample
-            u = batch_samples['u']
-            y = batch_samples['y']
-            # batch size x num words
-            pos_t = batch_samples['t'].t().contiguous()
-            # batch size x seqdim x seqlen
-            pos = batch_samples['X']
-            # batch size x neg batch size x seqdim x seqlen
-            neg, neg_t = self._withinbatch_negsample(pos, pos_t)
-
-            if self.model_type.find('2d') > -1:
-                # batch size x 1 x seqdim x seqlen
-                pos = pos.unsqueeze(1)
-                # batch size x neg batch size x 1 x seqdim x seqlen
-                neg = neg.unsqueeze(2)
-
-            if self.USE_CUDA:
-                u = u.cuda()
-                y = y.cuda()
-                pos = pos.cuda()
-                pos_t = pos_t.cuda()
-                neg = neg.cuda()
-                neg_t = neg_t.cuda()
-
-            # forward pass
-            self.model.zero_grad()
-            scores, log_probs = self.model(u, pos, pos_t, neg, neg_t)
-
-            # backward pass hinge loss
-            loss_1 = self.loss_func(scores, y)
-            # loss.backward(retain_graph=True)
-
-            # backward pass NLL loss
-            nbs = u.size()[0] * self.neg_batch_size
-            y_t = torch.cat([pos_t.t(), neg_t.view(-1, nbs).t()])
-            loss_2 = self.side_loss_func(log_probs, y_t)
-
-            loss = self.loss_alpha * loss_1 + (1 - self.loss_alpha) * loss_2
-            loss.backward()
-
-            # optimization step
-            self.optimizer.step()
-
-            # compute train loss
-            samples_processed += pos.size()[0]
-            losses_processed += scores.numel()
-
-            train_loss += loss_1.item() * scores.numel()
-            train_side_loss += loss_2.item() * scores.numel()
-
-        train_loss /= losses_processed
-        train_side_loss /= losses_processed
-
-        return samples_processed, train_loss, train_side_loss
-
-    def _eval_epoch(self, loader):
-        """Eval epoch."""
-        self.model.eval()
-        val_loss = 0
-        val_side_loss = 0
-        samples_processed = 0
-        losses_processed = 0
-
-        with torch.no_grad():
+        for i, loader in enumerate(loaders):
+            loader.dataset.dataset.load_song_batch(i)
             for batch_samples in tqdm(loader):
 
                 # prepare training sample
@@ -221,24 +175,92 @@ class DCUELM(DCUE):
                     neg_t = neg_t.cuda()
 
                 # forward pass
+                self.model.zero_grad()
                 scores, log_probs = self.model(u, pos, pos_t, neg, neg_t)
 
-                # compute loss
+                # backward pass hinge loss
                 loss_1 = self.loss_func(scores, y)
+                # loss.backward(retain_graph=True)
 
-                # compute side loss
+                # backward pass NLL loss
                 nbs = u.size()[0] * self.neg_batch_size
                 y_t = torch.cat([pos_t.t(), neg_t.view(-1, nbs).t()])
                 loss_2 = self.side_loss_func(log_probs, y_t)
 
+                loss = self.loss_alpha * loss_1 + (1 - self.loss_alpha) * loss_2
+                loss.backward()
+
+                # optimization step
+                self.optimizer.step()
+
+                # compute train loss
                 samples_processed += pos.size()[0]
                 losses_processed += scores.numel()
 
-                val_loss += loss_1.item() * scores.numel()
-                val_side_loss += loss_2.item() * scores.numel()
+                train_loss += loss_1.item() * scores.numel()
+                train_side_loss += loss_2.item() * scores.numel()
 
-            val_loss /= losses_processed
-            val_side_loss /= losses_processed
+            train_loss /= losses_processed
+            train_side_loss /= losses_processed
+
+        return samples_processed, train_loss, train_side_loss
+
+    def _eval_epoch(self, loaders):
+        """Eval epoch."""
+        self.model.eval()
+        val_loss = 0
+        val_side_loss = 0
+        samples_processed = 0
+        losses_processed = 0
+
+        with torch.no_grad():
+            for i, loader in enumerate(loaders):
+                loader.dataset.dataset.load_song_batch(i)
+                for batch_samples in tqdm(loader):
+
+                    # prepare training sample
+                    u = batch_samples['u']
+                    y = batch_samples['y']
+                    # batch size x num words
+                    pos_t = batch_samples['t'].t().contiguous()
+                    # batch size x seqdim x seqlen
+                    pos = batch_samples['X']
+                    # batch size x neg batch size x seqdim x seqlen
+                    neg, neg_t = self._withinbatch_negsample(pos, pos_t)
+
+                    if self.model_type.find('2d') > -1:
+                        # batch size x 1 x seqdim x seqlen
+                        pos = pos.unsqueeze(1)
+                        # batch size x neg batch size x 1 x seqdim x seqlen
+                        neg = neg.unsqueeze(2)
+
+                    if self.USE_CUDA:
+                        u = u.cuda()
+                        y = y.cuda()
+                        pos = pos.cuda()
+                        pos_t = pos_t.cuda()
+                        neg = neg.cuda()
+                        neg_t = neg_t.cuda()
+
+                    # forward pass
+                    scores, log_probs = self.model(u, pos, pos_t, neg, neg_t)
+
+                    # compute loss
+                    loss_1 = self.loss_func(scores, y)
+
+                    # compute side loss
+                    nbs = u.size()[0] * self.neg_batch_size
+                    y_t = torch.cat([pos_t.t(), neg_t.view(-1, nbs).t()])
+                    loss_2 = self.side_loss_func(log_probs, y_t)
+
+                    samples_processed += pos.size()[0]
+                    losses_processed += scores.numel()
+
+                    val_loss += loss_1.item() * scores.numel()
+                    val_side_loss += loss_2.item() * scores.numel()
+
+                val_loss /= losses_processed
+                val_side_loss /= losses_processed
 
         return samples_processed, val_loss, val_side_loss
 
@@ -258,6 +280,7 @@ class DCUELM(DCUE):
                User Embedding Dim: {}\n\
                Margin: {}\n\
                Dropout: {}\n\
+               Optimizer: {}\n\
                Learning Rate: {}\n\
                Beta One: {}\n\
                Beta Two: {}\n\
@@ -273,11 +296,12 @@ class DCUELM(DCUE):
                Attention: {}\n\
                Save Dir: {}".format(
                    self.feature_dim, self.batch_size, self.neg_batch_size,
-                   self.u_embdim, self.margin, self.dropout, self.lr,
-                   self.beta_one, self.beta_two, self.eps, self.weight_decay,
-                   self.num_epochs, self.model_type, self.data_type,
-                   self.n_users, self.n_items, self.hidden_size,
-                   self.dropout_rnn, self.attention, save_dir))
+                   self.u_embdim, self.margin, self.dropout, self.optimize,
+                   self.lr, self.beta_one, self.beta_two, self.eps,
+                   self.weight_decay, self.num_epochs, self.model_type,
+                   self.data_type, self.n_users, self.n_items,
+                   self.hidden_size, self.dropout_rnn, self.attention,
+                   save_dir))
 
         self.model_dir = save_dir
         self.metadata_csv = metadata_csv
@@ -289,12 +313,6 @@ class DCUELM(DCUE):
         self.load_item_dataset()
         self.load_pred_dataset(split='val')
 
-        train_loader = DataLoader(
-            self.train_data, batch_size=self.batch_size, shuffle=True,
-            num_workers=4)
-        val_loader = DataLoader(
-            self.val_data, batch_size=self.batch_size, shuffle=True,
-            num_workers=4)
         pred_loader = DataLoader(
             self.pred_data, batch_size=1024, shuffle=True, num_workers=4)
 
@@ -313,7 +331,8 @@ class DCUELM(DCUE):
             if epoch > 0:
                 print("Initializing train epoch...")
                 start = datetime.datetime.now()
-                sp, train_loss, train_sloss = self._train_epoch(train_loader)
+                train_loaders = self._batch_loaders(self.train_data)
+                sp, train_loss, train_sloss = self._train_epoch(train_loaders)
                 samples_processed += sp
                 end = datetime.datetime.now()
                 print("Train epoch processed in {}".format(end-start))
@@ -329,7 +348,8 @@ class DCUELM(DCUE):
                 # compute loss
                 print("Initializing val epoch...")
                 start = datetime.datetime.now()
-                _, val_loss, val_sloss = self._eval_epoch(val_loader)
+                val_loaders = self._batch_loaders(self.val_data)
+                _, val_loss, val_sloss = self._eval_epoch(val_loaders)
                 end = datetime.datetime.now()
                 print("Val epoch processed in {}".format(end-start))
 
@@ -408,12 +428,12 @@ class DCUELM(DCUE):
         """
         if (self.model is not None) and (models_dir is not None):
 
-            model_dir = "DCUELM_do_{}_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}_ni_{}\
-            _mt_{}_hs_{}_dr_{}_at_{}".\
-                format(self.dropout, self.lr, self.beta_one, self.beta_two,
-                       self.weight_decay, self.n_users, self.n_items,
-                       self.model_type, self.hidden_size, self.dropout_rnn,
-                       self.attention)
+            model_dir = "DCUELM_do_{}_op_{}_lr_{}_b1_{}_b2_{}_wd_{}_nu_{}\
+            _ni_{}_mt_{}_hs_{}_dr_{}_at_{}".\
+                format(self.dropout, self.optimize, self.lr, self.beta_one,
+                       self.beta_two, self.weight_decay, self.n_users,
+                       self.n_items, self.model_type, self.hidden_size,
+                       self.dropout_rnn, self.attention)
 
             if not os.path.isdir(os.path.join(models_dir, model_dir)):
                 os.makedirs(os.path.join(models_dir, model_dir))
